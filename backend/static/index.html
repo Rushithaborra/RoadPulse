@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>RoadPulse — live road conditions</title>
+  <link rel="stylesheet" href="/static/vendor/leaflet/leaflet.css">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header>
+    <div class="brand"><span class="dot"></span> RoadPulse <small>Know the road before you reach it</small></div>
+    <nav>
+      <button class="tab active" data-view="commuter">Commuter</button>
+      <button class="tab" data-view="authority">Traffic authority</button>
+    </nav>
+    <div id="conn" class="conn">connecting…</div>
+  </header>
+
+  <main>
+    <div id="map"></div>
+
+    <aside id="panel">
+      <!-- COMMUTER -->
+      <section id="view-commuter" class="view">
+        <h2>Find a safe route</h2>
+        <label>Vehicle
+          <select id="vehicle">
+            <option value="two_wheeler">Two-wheeler</option>
+            <option value="auto">Auto-rickshaw</option>
+            <option value="car" selected>Car</option>
+            <option value="bus">Bus</option>
+            <option value="ambulance">Ambulance</option>
+          </select>
+        </label>
+        <p class="hint" id="route-hint">Click the map to set your <b>start</b>.</p>
+        <div class="row">
+          <button id="btn-reroute" disabled>Recalculate</button>
+          <button id="btn-clear-route" class="ghost">Reset</button>
+        </div>
+        <div id="route-result"></div>
+
+        <h2>Live alerts</h2>
+        <ul id="public-incidents" class="list"></ul>
+
+        <h2>Flood watch</h2>
+        <ul id="public-hotspots" class="list"></ul>
+
+        <details>
+          <summary>Report a problem</summary>
+          <p class="hint">Uses the last point you clicked on the map.</p>
+          <label>What did you see?
+            <select id="report-type">
+              <option value="flood">Waterlogging</option>
+              <option value="accident">Accident</option>
+              <option value="blockage">Road blocked</option>
+              <option value="construction">Construction</option>
+            </select>
+          </label>
+          <label>Note (optional) <input id="report-note" maxlength="200"></label>
+          <button id="btn-report">Send report</button>
+          <p id="report-msg" class="hint"></p>
+        </details>
+      </section>
+
+      <!-- AUTHORITY -->
+      <section id="view-authority" class="view hidden">
+        <div id="login-box">
+          <h2>Officer login</h2>
+          <label>Username <input id="user" value="officer" autocomplete="username"></label>
+          <label>Password <input id="pass" type="password" autocomplete="current-password"></label>
+          <button id="btn-login">Log in</button>
+          <p id="login-msg" class="hint"></p>
+        </div>
+
+        <div id="dash" class="hidden">
+          <div class="row spread"><h2>Incidents</h2><button id="btn-logout" class="ghost small">Log out</button></div>
+          <div id="kpis" class="kpis"></div>
+          <ul id="officer-incidents" class="list"></ul>
+
+          <h2>Flood countdown</h2>
+          <div class="row">
+            <label class="grow">Rain (mm/h) override <input id="rain" type="number" min="0" max="200" step="1" placeholder="forecast"></label>
+            <button id="btn-rain" class="small">Set</button>
+          </div>
+          <ul id="officer-hotspots" class="list"></ul>
+
+          <h2>Decision support</h2>
+          <div id="decision" class="card muted">Select an incident to run a what-if, get signal advice or draft a bulletin.</div>
+
+          <details>
+            <summary>Register planned works</summary>
+            <p class="hint">Uses the last point you clicked on the map.</p>
+            <label>Title <input id="pw-title" value="Pipeline digging"></label>
+            <label>Starts in (min) <input id="pw-start" type="number" value="0"></label>
+            <label>Duration (h) <input id="pw-hours" type="number" value="4"></label>
+            <label class="check"><input id="pw-full" type="checkbox" checked> Full closure</label>
+            <button id="btn-pw">Register</button>
+          </details>
+
+          <details>
+            <summary>Before / after evaluation</summary>
+            <p class="hint">Simplified traffic model on this map, not SUMO. Uses current verified incidents.</p>
+            <button id="btn-eval">Run evaluation</button>
+            <div id="eval-result"></div>
+          </details>
+
+          <h2>Activity</h2>
+          <ul id="events" class="list small"></ul>
+        </div>
+      </section>
+    </aside>
+  </main>
+  <div id="toast" class="toast hidden"></div>
+
+  <script src="/static/vendor/leaflet/leaflet.js"></script>
+  <script src="/static/app.js"></script>
+</body>
+</html>
