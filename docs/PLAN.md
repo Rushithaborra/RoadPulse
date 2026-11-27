@@ -59,6 +59,12 @@ Fleet probes ───────────┘      │          │
 | GET | /api/feed | – | open incident feed |
 | POST | /api/stream/ticket | officer | one-time 60 s ticket for the officer stream |
 | GET | /api/stream[?ticket=] | – / ticket | SSE: public snapshot, or officer snapshot with a valid ticket (401 if spent) |
+| POST | /api/subscribers | – (rate limited, consent required) | alert sign-up; returns id + token (see `docs/ALERTS.md`) |
+| GET/DELETE | /api/subscribers/{id} | subscriber token | read / erase own data |
+| POST | /api/subscribers/{id}/places, /trip, /position | subscriber token | saved places, start a trip, live location |
+| GET | /api/subscribers/{id}/alerts | subscriber token | alert inbox |
+| GET | /api/boards, /api/boards/{id} | – | simulated roadside boards |
+| POST | /api/incidents/{id}/dispatch | officer | record police / ambulance / tow sent |
 
 Incident JSON: see `docs/incident_schema.json`.
 Errors: `422 {"detail": "<field>: <message>; ...", "errors": [{"field", "message"}]}` for invalid input, including

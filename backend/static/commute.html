@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>RoadPulse — my commute alerts</title>
+  <link rel="stylesheet" href="/static/vendor/leaflet/leaflet.css">
+  <style>
+    :root { --ink:#18202c; --muted:#596273; --line:#dfe3ea; --bg:#f3f5f8; --acc:#1558c0; --ok:#1a7f37; --warn:#7a4a00; --warnbg:#fff4e0; --red:#d1242f; }
+    * { box-sizing: border-box; }
+    body { margin:0; font:15px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; color:var(--ink); background:var(--bg); }
+    header { background:#fff; border-bottom:1px solid var(--line); padding:10px 14px; display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+    header b { font-size:17px; } header a { margin-left:auto; color:var(--acc); font-size:13px; }
+    main { max-width:980px; margin:0 auto; padding:12px; display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:12px; }
+    @media (max-width:760px) { main { grid-template-columns:1fr; } }
+    .card { background:#fff; border:1px solid var(--line); border-radius:10px; padding:12px 14px; }
+    h2 { font-size:12px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); margin:0 0 8px; }
+    label { display:block; margin:8px 0; font-size:13px; color:var(--muted); }
+    input, select { display:block; width:100%; margin-top:4px; padding:9px; border:1px solid #c5ccd8; border-radius:6px; font:inherit; color:var(--ink); background:#fff; }
+    label.check { display:flex; gap:8px; align-items:flex-start; } label.check input { width:auto; margin-top:3px; }
+    button { border:0; background:var(--acc); color:#fff; padding:10px 14px; border-radius:6px; cursor:pointer; font:inherit; font-weight:500; margin:3px 4px 3px 0; }
+    button.ghost { background:transparent; color:var(--acc); border:1px solid var(--acc); }
+    button.danger { background:transparent; color:var(--red); border:1px solid var(--red); }
+    button:disabled { opacity:.45; cursor:not-allowed; }
+    #map { height:340px; border-radius:8px; border:1px solid var(--line); }
+    .note { font-size:12px; color:var(--muted); } .hidden { display:none !important; }
+    .pill { display:inline-block; font-size:12px; padding:2px 9px; border-radius:999px; border:1px solid #c5ccd8; background:var(--bg); color:var(--muted); }
+    .pill.on { background:#e6f4ea; border-color:#9ad0a8; color:#17592a; }
+    .warnbox { background:var(--warnbg); border:1px solid #e3b25c; color:var(--warn); border-radius:8px; padding:8px 10px; font-size:13px; margin:8px 0; }
+    ul { list-style:none; margin:0; padding:0; } li.alert { border:1px solid var(--line); border-left:5px solid var(--acc); border-radius:6px; padding:8px 10px; margin-bottom:8px; }
+    li.alert.uturn, li.alert.no_alternative { border-left-color:var(--red); } li.alert.clear { border-left-color:var(--ok); } li.alert.pre_trip { border-left-color:#e8770f; }
+    li.alert .k { font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted); }
+    .sim { font-size:11px; border:1px dashed var(--muted); color:var(--muted); border-radius:4px; padding:0 5px; margin-left:6px; }
+  </style>
+</head>
+<body>
+  <header><b>RoadPulse · my commute</b><span id="who" class="pill hidden"></span><a href="/">Back to the map</a></header>
+  <main>
+    <section class="card" id="signup">
+      <h2>1. Set up alerts</h2>
+      <label>Your name <input id="name" maxlength="60" placeholder="e.g. Ravi"></label>
+      <label>Vehicle
+        <select id="vehicle"><option value="two_wheeler">Two-wheeler</option><option value="car">Car</option><option value="auto">Auto-rickshaw</option><option value="bus">Bus</option></select>
+      </label>
+      <label>Usual departure time (optional, for pre-trip alerts) <input id="depart" type="time"></label>
+      <label>Telegram chat id (optional) <input id="chat" inputmode="numeric" placeholder="from the RoadPulse bot: /start"></label>
+      <label class="check"><input id="voice" type="checkbox"> <span>Commute mode: speak alerts aloud (hands-free)</span></label>
+      <p class="note">Tap the map to set <b>home</b>, then <b>work</b>. The pre-trip alert uses them.</p>
+      <div><button id="pick-home" class="ghost">Set home</button><button id="pick-work" class="ghost">Set work</button></div>
+      <p class="note" id="places">Home: not set · Work: not set</p>
+      <label class="check"><input id="consent" type="checkbox"> <span>I agree RoadPulse may use my location, only to check whether a road incident is on my route. I can delete my data at any time.</span></label>
+      <button id="go">Start getting alerts</button>
+      <div id="signup-msg" class="note" role="status"></div>
+    </section>
+
+    <section class="card hidden" id="live">
+      <h2>2. Commute</h2>
+      <div id="state" class="note"></div>
+      <div class="warnbox">This page only receives your location while it stays <b>open with the screen on</b>. A phone browser pauses it in a pocket. Open it before you ride and mount the phone, or use the Telegram bot.</div>
+      <label>Leaving in (minutes) <input id="leave-in" type="number" min="0" max="1440" value="10"></label>
+      <button id="set-depart" class="ghost">Set my departure</button>
+      <div>
+        <button id="voice-test">Enable voice</button>
+        <button id="gps">Start commute (use my GPS)</button>
+        <button id="sim" class="ghost">Demo: simulate my drive</button>
+        <button id="stop" class="ghost hidden">Stop</button>
+      </div>
+      <label>Simulated speed <select id="speed"><option value="1">1x (real time)</option><option value="4" selected>4x</option><option value="10">10x</option></select></label>
+      <button id="forget" class="danger">Delete my data</button>
+    </section>
+
+    <section class="card"><h2>Map</h2><div id="map"></div></section>
+
+    <section class="card"><h2>My alerts <span id="alert-n" class="pill"></span></h2>
+      <ul id="alerts"><li class="note">No alerts yet. Alerts are sent only if an incident is on your route.</li></ul>
+    </section>
+  </main>
+
+  <script src="/static/vendor/leaflet/leaflet.js"></script>
+  <script>
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const store = { get(k) { try { return JSON.parse(localStorage.getItem(k)); } catch (e) { return null; } },
+                  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* private mode */ } },
+                  del(k) { try { localStorage.removeItem(k); } catch (e) { /* ignore */ } } };
+  let sub = store.get("rp_sub");           // { id, token }
+  let home = null, work = null, pick = null, voiceOn = false, since = 0, watchId = null, simTimer = null, me = null;
+  const shown = new Set();
+
+  // ---------- map
+  const map = L.map("map").setView([17.7287, 83.3086], 15);
+  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19,
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors' }).addTo(map);
+  const layers = { home: null, work: null, me: null, route: null };
+  fetch("/api/network").then((r) => r.json()).then((n) => {
+    n.segments.forEach((s) => L.polyline(s.coords, { color: "#9aa5b5", weight: 2, opacity: .6 }).addTo(map));
+    if (n.center) map.setView(n.center, 15);
+  }).catch(() => {});
+  function pin(kind, ll, color, label) {
+    if (layers[kind]) map.removeLayer(layers[kind]);
+    layers[kind] = L.circleMarker(ll, { radius: 9, color, fillColor: color, fillOpacity: .9 }).bindTooltip(label, { permanent: kind !== "me" }).addTo(map);
+  }
+  map.on("click", (e) => {
+    if (!pick) return;
+    const ll = [e.latlng.lat, e.latlng.lng];
+    if (pick === "home") { home = ll; pin("home", ll, "#1a7f37", "Home"); } else { work = ll; pin("work", ll, "#1558c0", "Work"); }
+    pick = null; places();
+  });
+  function places() { $("places").textContent = `Home: ${home ? "set" : "not set"} · Work: ${work ? "set" : "not set"}`; }
+  $("pick-home").onclick = () => { pick = "home"; $("signup-msg").textContent = "Tap your home on the map."; };
+  $("pick-work").onclick = () => { pick = "work"; $("signup-msg").textContent = "Tap your work on the map."; };
+
+  // ---------- api
+  async function api(path, opts = {}) {
+    const headers = { "Content-Type": "application/json", ...(sub ? { "X-Subscriber-Token": sub.token } : {}), ...(opts.headers || {}) };
+    const res = await fetch(path, { ...opts, headers });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(body.detail || `Request failed (${res.status})`);
+    return body;
+  }
+
+  // ---------- sign up
+  $("go").onclick = async () => {
+    const msg = $("signup-msg");
+    if (!$("name").value.trim()) { msg.textContent = "Enter your name."; return; }
+    if (!$("consent").checked) { msg.textContent = "Tick the consent box: alerts need your location."; return; }
+    const body = { name: $("name").value.trim(), vehicle: $("vehicle").value, voice: $("voice").checked, consent_location: true,
+      depart_hhmm: $("depart").value || null, telegram_chat: $("chat").value.trim() || null };
+    if (home) { body.home_lat = home[0]; body.home_lon = home[1]; }
+    if (work) { body.work_lat = work[0]; body.work_lon = work[1]; }
+    $("go").disabled = true; msg.textContent = "Saving…";
+    try {
+      const r = await api("/api/subscribers", { method: "POST", body: JSON.stringify(body), headers: {} });
+      sub = { id: r.id, token: r.token, voice: body.voice, name: body.name, home, work }; store.set("rp_sub", sub);
+      msg.textContent = ""; enter();
+    } catch (e) { msg.textContent = e.message; $("go").disabled = false; }
+  };
+
+  function enter() {
+    $("signup").classList.add("hidden"); $("live").classList.remove("hidden");
+    $("who").classList.remove("hidden"); $("who").textContent = sub.name || sub.id;
+    if (sub.home) { home = sub.home; pin("home", home, "#1a7f37", "Home"); }
+    if (sub.work) { work = sub.work; pin("work", work, "#1558c0", "Work"); }
+    refreshState(); poll(); setInterval(poll, 3000);
+  }
+  async function refreshState() {
+    try {
+      const s = await api(`/api/subscribers/${sub.id}`);
+      const dep = s.depart_at ? new Date(s.depart_at * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "not set";
+      $("state").innerHTML = `Next departure: <b>${dep}</b> · pre-trip alert goes out 15 min before · voice <span class="pill ${sub.voice ? "on" : ""}">${sub.voice ? "on" : "off"}</span> · Telegram <span class="pill ${s.telegram ? "on" : ""}">${s.telegram ? "linked" : "no"}</span>`;
+    } catch (e) { $("state").textContent = e.message; if (/Unknown subscriber/.test(e.message)) forget(true); }
+  }
+  $("set-depart").onclick = async () => {
+    try { await api(`/api/subscribers/${sub.id}/trip`, { method: "POST", body: JSON.stringify({ dest: "work", depart_in_min: Number($("leave-in").value) }) }); refreshState(); poll(); }
+    catch (e) { $("state").textContent = e.message; }
+  };
+
+  // ---------- alerts
+  function speak(text) {
+    if (!voiceOn || !("speechSynthesis" in window)) return;
+    try { speechSynthesis.cancel(); const u = new SpeechSynthesisUtterance(text); u.lang = "en-IN"; u.rate = 0.95; speechSynthesis.speak(u); } catch (e) { /* unsupported */ }
+    try { navigator.vibrate && navigator.vibrate([200, 100, 200]); } catch (e) { /* unsupported */ }
+  }
+  $("voice-test").onclick = () => { voiceOn = true; $("voice-test").textContent = "Voice enabled"; speak("Voice alerts are on."); };
+  function addAlert(a) {
+    if (shown.has(a.id)) return; shown.add(a.id);
+    const list = $("alerts"); if (list.querySelector(".note")) list.innerHTML = "";
+    const li = document.createElement("li"); li.className = `alert ${a.kind}`;
+    li.innerHTML = `<div class="k">${esc(a.kind.replace("_", " "))} · ${new Date(a.ts * 1000).toLocaleTimeString()}${a.simulated ? '<span class="sim">SIMULATED</span>' : ""}${a.late ? " · late warning" : ""}</div>${esc(a.text)}`;
+    list.prepend(li); $("alert-n").textContent = shown.size;
+    if (a.route && a.route.length) { if (layers.route) map.removeLayer(layers.route); layers.route = L.polyline(a.route, { color: "#1a7f37", weight: 5, opacity: .85 }).addTo(map); map.fitBounds(layers.route.getBounds(), { padding: [30, 30] }); }
+    if (sub.voice || voiceOn) speak(a.voice);
+  }
+  async function poll() {
+    try { const r = await api(`/api/subscribers/${sub.id}/alerts?since=${since}`); r.alerts.forEach((a) => { addAlert(a); since = Math.max(since, a.ts); }); } catch (e) { /* offline: retry */ }
+  }
+
+  // ---------- commute: real GPS or a simulated drive
+  function post(lat, lon, kph) {
+    if (me) { /* keep marker */ }
+    pin("me", [lat, lon], "#d1242f", "You");
+    return api(`/api/subscribers/${sub.id}/position`, { method: "POST", body: JSON.stringify({ lat, lon, speed_kph: kph ?? null, simulated: !!simTimer }) })
+      .then((r) => { if (r.alert) { addAlert(r.alert); since = Math.max(since, r.alert.ts); } }).catch((e) => { $("state").textContent = e.message; });
+  }
+  async function ensureTrip() { await api(`/api/subscribers/${sub.id}/trip`, { method: "POST", body: JSON.stringify({ dest: "work" }) }); }
+  function running(on) { $("stop").classList.toggle("hidden", !on); $("gps").disabled = on; $("sim").disabled = on; }
+  $("gps").onclick = async () => {
+    if (!navigator.geolocation) { $("state").textContent = "This browser has no location support."; return; }
+    if (!work) { $("state").textContent = "Set your work place first (reload the page and set it on the map)."; return; }
+    try { await ensureTrip(); } catch (e) { $("state").textContent = e.message; return; }
+    let last = 0; running(true);
+    watchId = navigator.geolocation.watchPosition((p) => { const t = Date.now(); if (t - last < 3000) return; last = t;
+      post(p.coords.latitude, p.coords.longitude, p.coords.speed != null ? p.coords.speed * 3.6 : null); },
+      (err) => { $("state").textContent = "Location error: " + err.message; }, { enableHighAccuracy: true, maximumAge: 2000 });
+  };
+  $("sim").onclick = async () => {
+    if (!home || !work) { $("state").textContent = "Set both home and work first."; return; }
+    try {
+      await ensureTrip();
+      const r = await api("/api/routes", { method: "POST", body: JSON.stringify({ from_lat: home[0], from_lon: home[1], to_lat: work[0], to_lon: work[1], vehicle: sub.vehicle || $("vehicle").value, alternatives: 1 }) });
+      const pts = r.usual_route; if (!pts || pts.length < 2) throw new Error("No route between home and work.");
+      L.polyline(pts, { color: "#1558c0", weight: 3, dashArray: "6 6" }).addTo(map);
+      const dist = (a, b) => map.distance(a, b); let i = 0, into = 0; running(true);
+      const stepM = 9 * Number($("speed").value);   // metres per second of wall clock at 9 m/s
+      simTimer = setInterval(() => {
+        let left = stepM;
+        while (left > 0 && i < pts.length - 1) { const d = dist(pts[i], pts[i + 1]) - into; if (left < d) { into += left; left = 0; } else { left -= d; i++; into = 0; } }
+        if (i >= pts.length - 1) { stop(); return; }
+        const a = pts[i], b = pts[i + 1], f = into / Math.max(dist(a, b), 1);
+        post(a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f, 32);
+      }, 1000);
+    } catch (e) { $("state").textContent = e.message; }
+  };
+  function stop() { if (watchId != null) navigator.geolocation.clearWatch(watchId); watchId = null; if (simTimer) clearInterval(simTimer); simTimer = null; running(false); }
+  $("stop").onclick = stop;
+
+  // ---------- privacy: delete everything
+  async function forget(silent) {
+    if (!silent && !confirm("Delete your saved places and alert history from RoadPulse?")) return;
+    stop();
+    try { if (!silent) await api(`/api/subscribers/${sub.id}`, { method: "DELETE" }); } catch (e) { /* already gone */ }
+    store.del("rp_sub"); location.reload();
+  }
+  $("forget").onclick = () => forget(false);
+
+  if (sub && sub.id) enter();
+  </script>
+</body>
+</html>

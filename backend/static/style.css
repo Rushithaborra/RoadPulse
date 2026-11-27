@@ -139,3 +139,6 @@ details.block[open] summary { margin-bottom: 6px; }
   .tabs { margin-left: 0; }
   .brand small { display: none; }
 }
+
+/* officer action row: severity picker sits with the buttons */
+.actions select.small { padding: 3px 6px; font-size: 12px; border: 1px solid var(--line-strong); border-radius: 6px; background: #fff; color: var(--ink); max-width: 100%; }

@@ -125,6 +125,7 @@ class RateLimiter:
 
 REPORT_LIMIT = RateLimiter(rate_per_min=float(os.getenv("REPORT_RATE_PER_MIN", 6)), burst=5)
 DEVICE_LIMIT = RateLimiter(rate_per_min=float(os.getenv("DEVICE_RATE_PER_MIN", 600)), burst=100)
+SUBSCRIBE_LIMIT = RateLimiter(rate_per_min=float(os.getenv("SUBSCRIBE_RATE_PER_MIN", 10)), burst=5)
 ROUTE_LIMIT = RateLimiter(rate_per_min=float(os.getenv("ROUTE_RATE_PER_MIN", 120)), burst=30)
 
 

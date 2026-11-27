@@ -33,6 +33,9 @@ CREATE TABLE IF NOT EXISTS reports (
   id INTEGER PRIMARY KEY AUTOINCREMENT, type TEXT NOT NULL, lat REAL NOT NULL, lon REAL NOT NULL,
   reporter_id TEXT NOT NULL, note TEXT, at REAL NOT NULL
 );
+CREATE TABLE IF NOT EXISTS subscribers (
+  id TEXT PRIMARY KEY, updated REAL NOT NULL, doc TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS audit_log (
   id INTEGER PRIMARY KEY AUTOINCREMENT, at REAL NOT NULL, actor TEXT NOT NULL, action TEXT NOT NULL,
   target TEXT, detail TEXT
@@ -105,6 +108,24 @@ class Database:
                 "SELECT at,actor,action,target,detail FROM audit_log ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
         return [{"at": r[0], "actor": r[1], "action": r[2], "target": r[3], "detail": r[4]} for r in rows]
 
+    def save_subscriber(self, doc: dict, at: float):
+        self._exec("INSERT INTO subscribers(id,updated,doc) VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET "
+                   "updated=excluded.updated, doc=excluded.doc", (doc["id"], at, json.dumps(doc)))
+
+    def load_subscribers(self) -> list[dict]:
+        with self._lock:
+            rows = self.conn.execute("SELECT doc FROM subscribers").fetchall()
+        out = []
+        for (doc,) in rows:
+            try:
+                out.append(json.loads(doc))
+            except Exception:
+                continue
+        return out
+
+    def delete_subscriber(self, sub_id: str):
+        self._exec("DELETE FROM subscribers WHERE id = ?", (sub_id,))
+
     def apply_retention(self, now_ts: float, readings_days: int = 7, reports_days: int = 30, cleared_days: int = 30):
         """Delete raw inputs past their retention period (privacy + bounded disk). Audit log is kept."""
         with self._lock:
@@ -112,9 +133,11 @@ class Database:
             self.conn.execute("DELETE FROM reports WHERE at < ?", (now_ts - reports_days * 86400,))
             self.conn.execute("DELETE FROM incidents WHERE status = 'Cleared' AND updated < ?",
                               (now_ts - cleared_days * 86400,))
+            # commuters who stopped using the service: their saved places are personal data, so they expire too
+            self.conn.execute("DELETE FROM subscribers WHERE updated < ?", (now_ts - cleared_days * 86400,))
             self.conn.commit()
 
     def count(self, table: str) -> int:
-        assert table in {"incidents", "status_changes", "sensor_readings", "reports", "audit_log"}
+        assert table in {"incidents", "status_changes", "sensor_readings", "reports", "audit_log", "subscribers"}
         with self._lock:
             return self.conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]

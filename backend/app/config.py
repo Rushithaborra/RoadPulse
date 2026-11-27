@@ -23,11 +23,13 @@ REVIEW_CONFIDENCE = _f("REVIEW_CONFIDENCE", 0.4)     # shown to officers as "unv
 
 # Sources that authenticate (device key, officer token, agency entry). Public reports are NOT trusted:
 # their reporter_id is client-supplied, so any number of reports counts as one untrusted source.
-TRUSTED_SOURCES = {"sensor", "probe", "cctv", "planned", "officer"}
+# Speed probes are deliberately NOT trusted: slow traffic has many innocent causes (a slow driver, a signal queue,
+# ordinary congestion), so speed only raises a "Suspected slowdown" for officers and never verifies on its own.
+TRUSTED_SOURCES = {"sensor", "cctv", "planned", "officer"}
 
 SOURCE_WEIGHTS = {
     "sensor": 0.8,
-    "probe": 0.5,
+    "probe": 0.4,
     "cctv": 0.5,
     "report": 0.35,
     "planned": 1.0,
@@ -39,6 +41,28 @@ PROBE_WINDOW_S = _f("PROBE_WINDOW_S", 5 * 60)
 PROBE_MIN_SAMPLES = int(_f("PROBE_MIN_SAMPLES", 3))
 PROBE_DROP_RATIO = _f("PROBE_DROP_RATIO", 0.4)       # median below 40% of normal speed = anomaly
 PROBE_RECOVER_RATIO = _f("PROBE_RECOVER_RATIO", 0.8)
+
+# Speed-probe rule v2 (see probe_rules.py): judged per road LINK (junction to junction), from many vehicles, against
+# the road's normal for this time of week, ignoring junction zones (signal queues), and it must last.
+PROBE_MIN_VEHICLES = int(_f("PROBE_MIN_VEHICLES", 8))        # fewer distinct vehicles: "not enough data"
+PROBE_SLOW_RATIO = _f("PROBE_SLOW_RATIO", 0.4)               # "slow" = under 40% of this road's normal speed
+PROBE_SLOW_FRAC = _f("PROBE_SLOW_FRAC", 0.6)                 # a clear majority must be slow, not one slow driver
+PROBE_SUSTAIN_S = _f("PROBE_SUSTAIN_S", 180)                 # longer than a signal cycle
+PROBE_JUNCTION_ZONE_M = _f("PROBE_JUNCTION_ZONE_M", 60)      # samples this close to a junction are ignored
+PROBE_FALLBACK_FRACTION = _f("PROBE_FALLBACK_FRACTION", 0.6) # normal speed = this x speed limit until learned
+PROBE_BASELINE_MIN_UPDATES = int(_f("PROBE_BASELINE_MIN_UPDATES", 5))
+
+# Alert delivery (see alerts.py)
+ALERT_WARN_HORIZON_S = _f("ALERT_WARN_HORIZON_S", 120)       # warn when the turn-off is this close in time
+ALERT_MIN_LEAD_S = _f("ALERT_MIN_LEAD_S", 15)                # less than this: flagged as a late warning
+ALERT_TURNOFF_SLACK_S = _f("ALERT_TURNOFF_SLACK_S", 60)      # prefer the LAST turn-off if it costs at most this much more
+PRETRIP_LEAD_S = _f("PRETRIP_LEAD_S", 900)                   # pre-trip alert goes out this long before departure
+POSITION_FRESH_S = _f("POSITION_FRESH_S", 120)               # a position older than this is ignored
+ALERT_MIN_EVAL_GAP_S = _f("ALERT_MIN_EVAL_GAP_S", 2)         # at most one route check per subscriber per N seconds
+BOARD_LOOKAHEAD_M = _f("BOARD_LOOKAHEAD_M", 600)             # a board warns about incidents this far ahead
+BOARD_COUNT = int(_f("BOARD_COUNT", 4))                      # boards cost money: only a few chokepoints
+BOARDS_PATH = os.getenv("BOARDS_PATH", os.path.join(os.path.dirname(__file__), "..", "..", "data", "boards.json"))
+UTC_OFFSET_S = int(_f("UTC_OFFSET_S", 19800))                # India Standard Time, for saved departure times
 
 # Lifecycle
 CLEAR_WINDOW_S = _f("CLEAR_WINDOW_S", 120)           # demo default; use 600 (10 min) in a real pilot

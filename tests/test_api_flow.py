@@ -83,14 +83,26 @@ def test_single_report_stays_unverified(client):
     assert client.get("/api/incidents").json()["incidents"] == []  # not shown to commuters yet
 
 
+def _slow_traffic(client, lat, lon, n=10, kph=3, ts=None, tag="bus"):
+    """n distinct vehicles reporting the same slow speed at a point (rule v2 needs many vehicles that stay slow)."""
+    return [client.post("/api/probes", json={"vehicle_id": f"{tag}-{i}", "lat": lat, "lon": lon, "speed_kph": kph,
+                                             "ts": ts}, headers=DEV).json() for i in range(n)]
+
+
 def test_probe_slowdown_detection(client):
+    import time
     from app.main import S
+    from app.store import store
+    store.reset()
     u, v = "n-2_0", "n-2_1"
     (a, b), (c, d) = S.rg.node_latlon(u), S.rg.node_latlon(v)
-    results = [client.post("/api/probes", json={"vehicle_id": f"bus-{i}", "lat": (a + c) / 2, "lon": (b + d) / 2,
-                                                "speed_kph": 4}, headers=DEV).json() for i in range(4)]
-    assert results[0]["status"] == "unknown"  # fewer than 3 vehicles: no judgement yet
-    assert any(r.get("incident") for r in results)
+    lat, lon, now = (a + c) / 2, (b + d) / 2, time.time()
+    first = _slow_traffic(client, lat, lon, n=7, ts=now - 240)
+    assert first[0]["status"] == "unknown"         # fewer than 8 vehicles: no judgement yet
+    assert not any(r.get("incident") for r in first)
+    _slow_traffic(client, lat, lon, n=10, ts=now - 240, tag="more")
+    later = _slow_traffic(client, lat, lon, n=10, ts=now, tag="again")   # still slow 4 minutes later: sustained
+    assert any(r.get("incident") for r in later)
 
 
 def test_planned_works_window(client, officer_headers):
@@ -126,10 +138,11 @@ def test_slowdown_merges_with_nearby_accident_not_distant_flood(client, officer_
     # accident ~210 m away: speed drop then a report at the same spot
     lat = h["lat"] - 150 / 111_320
     lon = h["lon"] - 150 / (111_320 * math.cos(math.radians(h["lat"])))
-    for i in range(4):
-        client.post("/api/probes", json={"vehicle_id": f"b{i}", "lat": lat, "lon": lon, "speed_kph": 3}, headers=DEV)
+    import time
+    _slow_traffic(client, lat, lon, n=10, ts=time.time() - 240, tag="a")
+    _slow_traffic(client, lat, lon, n=10, ts=time.time(), tag="b")     # sustained slow traffic: a suspicion
     rep = client.post("/api/reports", json={"type": "accident", "lat": lat, "lon": lon, "reporter_id": "u1"}).json()
-    # probe 0.5 + report 0.35 → 0.675 (still needs one more source or an officer)
+    # probe 0.4 + report 0.35 → 0.61 (a probe is not trusted: it still needs a trusted source or an officer)
     assert rep["confidence"] > 0.6
     all_inc = client.get("/api/incidents?scope=all", headers=officer_headers).json()["incidents"]
     flood = next(i for i in all_inc if i["type"] == "flood")

@@ -412,6 +412,8 @@ $("btn-report").addEventListener("click", async () => {
 });
 
 // ---------------------------------------------------------------- authority
+const UNIT_LABEL = { police: "police", ambulance: "ambulance (108)", tow: "tow vehicle", drainage: "drainage crew", marshal: "traffic marshal" };
+
 function evidenceHtml(i) {
   const d = state.evidence[i.id];
   if (!d) return `<div class="evidence muted">Loading evidence…</div>`;
@@ -424,6 +426,8 @@ function evidenceHtml(i) {
       <dt>Location</dt><dd>${ll5([d.lat, d.lon])}</dd>
       <dt>Severity</dt><dd>${d.severity}${d.depth_cm != null ? ` · ${Math.round(d.depth_cm)} cm` : ""} · blocks: ${esc(d.affected_vehicles.map((v) => VEHICLE_LABEL[v]).join(", ") || "none")}</dd>
       <dt>Confidence</dt><dd>${d.confidence.toFixed(2)} (auto-verify needs 0.70 and a trusted source)</dd>
+      <dt>Warned</dt><dd>${d.people_warned || 0} commuter${d.people_warned === 1 ? "" : "s"} alerted (by route, not by radius)</dd>
+      <dt>Dispatched</dt><dd>${(d.dispatched || []).map((x) => `${esc(UNIT_LABEL[x.unit] || x.unit)} ${clock(x.at)}`).join(", ") || "nobody yet"}</dd>
       <dt>Timeline</dt><dd>${esc(times)}${d.cleared_reason ? ` · ${esc(d.cleared_reason)}` : ""}</dd></dl>
       <table><tr><th>Time</th><th>Source</th><th>Weight</th><th>Detail</th></tr>${rows || `<tr><td colspan="4" class="muted">No signals recorded.</td></tr>`}</table></div>`;
 }
@@ -436,9 +440,12 @@ function officerItem(i) {
   return `<li class="${sel ? "sel" : ""}" data-id="${i.id}">
     <span class="badge sev-${i.severity}">${i.severity}</span><span class="badge st st-${i.status}">${i.status}</span>${i.simulated ? SIM : ""}
     <b>${esc(i.title)}</b>
-    <div class="meta">${i.road ? `${esc(i.road)} · ` : ""}confidence ${i.confidence.toFixed(2)} · ${esc(src)}${i.depth_cm != null ? ` · ${Math.round(i.depth_cm)} cm` : ""}${clearing}${upcoming}</div>
+    <div class="meta">${i.road ? `${esc(i.road)} · ` : ""}confidence ${i.confidence.toFixed(2)} · ${esc(src)}${i.depth_cm != null ? ` · ${Math.round(i.depth_cm)} cm` : ""}${clearing}${upcoming}${i.people_warned ? ` · <b>${i.people_warned} warned</b>` : ""}</div>
     <div class="actions">
+      ${["Reported", "Verified"].includes(i.status) && i.type !== "flood" && i.type !== "construction" ? `<select class="small" data-sev title="You decide how bad it is: Closed means nobody can pass">
+        <option value="">Severity: automatic</option><option value="Low">Low: one lane blocked</option><option value="Medium">Medium: slow</option><option value="Severe">Severe: very slow</option><option value="Closed">Closed: road blocked</option></select>` : ""}
       ${i.status === "Reported" ? `<button class="small" data-act="verify">Verify</button><button class="small warn" data-act="reject">Reject</button>` : ""}
+      ${["Reported", "Verified", "Responding"].includes(i.status) ? ["police", "ambulance", "tow"].map((u) => `<button class="small ghost" data-act="dispatch" data-unit="${u}" title="Record that ${UNIT_LABEL[u]} was sent">Send ${UNIT_LABEL[u]}</button>`).join("") : ""}
       ${["Reported", "Verified"].includes(i.status) ? `<button class="small ok" data-act="respond">Approve diversion</button>` : ""}
       <button class="small ghost" data-act="evidence">${sel ? "Hide evidence" : "Evidence"}</button>
       <button class="small ghost" data-act="whatif">What-if</button>
@@ -485,8 +492,13 @@ async function officerClick(e) {
   if (!act) { return; }
   try {
     if (act === "evidence") { selectIncident(id); return; }
-    if (["verify", "respond", "clear", "reject"].includes(act)) {
-      await api(`/api/incidents/${id}/${act}`, { method: "POST", body: "{}" });
+    if (act === "dispatch") {
+      await api(`/api/incidents/${id}/dispatch`, { method: "POST", body: JSON.stringify({ unit: e.target.dataset.unit }) });
+      toast(`${UNIT_LABEL[e.target.dataset.unit]} recorded as sent (RoadPulse does not call them)`);
+      loadEvidence(id);
+    } else if (["verify", "respond", "clear", "reject"].includes(act)) {
+      const sev = li.querySelector("select[data-sev]");
+      await api(`/api/incidents/${id}/${act}`, { method: "POST", body: JSON.stringify(sev && sev.value ? { severity: sev.value } : {}) });
       toast({ verify: "Incident verified: now visible to commuters", respond: "Diversion approved", clear: "Incident resolved: road available again", reject: "Report rejected" }[act]);
       if (state.selected === id) loadEvidence(id);
     } else if (act === "whatif") {

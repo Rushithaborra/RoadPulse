@@ -57,6 +57,8 @@ class Incident(BaseModel):
     cleared_reason: Optional[str] = None
     affected_vehicles: list[str] = Field(default_factory=list)  # classes that cannot pass
     hotspot_id: Optional[str] = None
+    dispatched: list[dict] = Field(default_factory=list)  # units sent by an officer: {unit, by, at}
+    severity_set: bool = False  # an officer chose the severity (e.g. road fully closed); rules no longer override it
 
 
 # ---- API inputs (validated at the model level) ----
@@ -150,3 +152,79 @@ class WhatIfRequest(BaseModel):
     incident_id: str
     trips: int = Field(default=400, ge=50, le=2000)
     seed: int = 7
+
+
+DispatchUnit = Literal["police", "ambulance", "tow", "drainage", "marshal"]
+
+
+class Dispatch(BaseModel):
+    unit: DispatchUnit
+    note: Optional[str] = Field(default=None, max_length=120)
+
+
+HHMM = Annotated[str, Field(pattern=r"^([01]\d|2[0-3]):[0-5]\d$")]
+
+
+class SubscriberIn(BaseModel):
+    """A commuter who wants alerts. Location is only stored with explicit consent."""
+    name: str = Field(min_length=1, max_length=60)
+    vehicle: VehicleClass = "two_wheeler"
+    voice: bool = False                       # commute mode: alerts are spoken by the phone page
+    telegram_chat: Optional[str] = Field(default=None, max_length=32, pattern=r"^-?\d+$")
+    home_lat: Optional[Lat] = None
+    home_lon: Optional[Lon] = None
+    work_lat: Optional[Lat] = None
+    work_lon: Optional[Lon] = None
+    depart_hhmm: Optional[HHMM] = None        # usual departure time (India Standard Time)
+    consent_location: bool = False
+
+    @model_validator(mode="after")
+    def _checks(self):
+        if not self.consent_location:
+            raise ValueError("consent_location must be true: alerts need the commuter's location")
+        for a, b in ((self.home_lat, self.home_lon), (self.work_lat, self.work_lon)):
+            if (a is None) != (b is None):
+                raise ValueError("give both latitude and longitude")
+        return self
+
+
+class TripStart(BaseModel):
+    """Start (or change) the current trip. dest is 'work', 'home' or explicit coordinates."""
+    dest: Optional[Literal["work", "home"]] = None
+    lat: Optional[Lat] = None
+    lon: Optional[Lon] = None
+    depart_in_min: Optional[float] = Field(default=None, ge=0, le=1440, allow_inf_nan=False)  # next departure
+
+    @model_validator(mode="after")
+    def _one(self):
+        if self.dest is None and (self.lat is None or self.lon is None) and self.depart_in_min is None:
+            raise ValueError("give dest, or lat and lon, or depart_in_min")
+        return self
+
+
+class PositionIn(BaseModel):
+    lat: Lat
+    lon: Lon
+    speed_kph: Optional[float] = Field(default=None, ge=0, le=200, allow_inf_nan=False)
+    ts: Optional[float] = Field(default=None, allow_inf_nan=False)
+    simulated: bool = False
+
+    _ts = field_validator("ts")(classmethod(lambda cls, v: _check_ts(v)))
+
+
+class PlacesIn(BaseModel):
+    """Change saved places and usual departure (the Telegram bot sets them from shared locations)."""
+    home_lat: Optional[Lat] = None
+    home_lon: Optional[Lon] = None
+    work_lat: Optional[Lat] = None
+    work_lon: Optional[Lon] = None
+    depart_hhmm: Optional[HHMM] = None
+
+    @model_validator(mode="after")
+    def _pairs(self):
+        for a, b in ((self.home_lat, self.home_lon), (self.work_lat, self.work_lon)):
+            if (a is None) != (b is None):
+                raise ValueError("give both latitude and longitude")
+        if all(v is None for v in (self.home_lat, self.work_lat, self.depart_hhmm)):
+            raise ValueError("nothing to change")
+        return self
