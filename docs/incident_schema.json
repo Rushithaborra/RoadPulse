@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "RoadPulse Incident (API view, v1)",
+  "type": "object",
+  "required": ["id", "type", "title", "lat", "lon", "severity", "confidence", "status", "published", "affected_vehicles"],
+  "properties": {
+    "id": {"type": "string", "example": "inc-7f3a2c19"},
+    "type": {"enum": ["flood", "accident", "blockage", "construction", "slowdown"]},
+    "title": {"type": "string", "example": "Waterlogging · Railway underpass"},
+    "road": {"type": ["string", "null"]},
+    "lat": {"type": "number"},
+    "lon": {"type": "number"},
+    "severity": {"enum": ["Low", "Medium", "Severe", "Closed"]},
+    "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+    "status": {"enum": ["Reported", "Verified", "Responding", "Cleared"]},
+    "published": {"type": "boolean", "description": "shown to commuters and used in routing (confidence >= 0.7, active, not cleared)"},
+    "active": {"type": "boolean", "description": "false for planned works whose window has not started"},
+    "depth_cm": {"type": ["number", "null"]},
+    "affected_vehicles": {"type": "array", "items": {"enum": ["two_wheeler", "auto", "car", "ambulance", "bus"]},
+                          "description": "vehicle classes that must not use the affected road"},
+    "affected_segments": {"type": "array", "description": "[[lat, lon], [lat, lon]] road segments touched"},
+    "hotspot_id": {"type": ["string", "null"]},
+    "status_times": {"type": "object", "description": "status -> unix time first entered"},
+    "stage_minutes": {"type": "object", "description": "e.g. {\"Reported->Verified\": 0.6}"},
+    "signals_by_source": {"type": "object", "description": "e.g. {\"sensor\": 9, \"report\": 1}"},
+    "clearing_in_s": {"type": ["integer", "null"], "description": "seconds until auto-clear, if conditions are normal"},
+    "starts": {"type": ["number", "null"]},
+    "ends": {"type": ["number", "null"]},
+    "cleared_reason": {"type": ["string", "null"]},
+    "updated": {"type": "number"}
+  }
+}
