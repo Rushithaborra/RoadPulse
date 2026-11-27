@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import threading
 import logging
 import os
 import time
@@ -14,18 +15,17 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import config, evaluate, forecast, fusion, services
+from . import config, evaluate, forecast, fusion, routing, services
+from .geo import haversine_m
 from .db import Database
 from .models import (CitizenReport, Incident, PlannedWork, ProbeSample, RainOverride, RouteRequest,
                      SensorReading, Signal, now)
 from .roadgraph import RoadGraph
-from .routing import incident_effects, route_alternatives, weighted_graph
-from .security import (DEVICE_LIMIT, REPORT_LIMIT, ROUTE_LIMIT, issue_token, limit, optional_officer,
-                       require_device, require_officer, verify_token)
+from .routing import incident_effects, route_alternatives
+from .security import (DEVICE_LIMIT, REPORT_LIMIT, ROUTE_LIMIT, consume_stream_ticket, issue_stream_ticket,
+                       issue_token, limit, optional_officer, require_device, require_officer)
 from .store import store
 
-logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"),
-                    format="%(asctime)s %(levelname)s %(name)s %(message)s")
 log = logging.getLogger("roadpulse")
 
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "..", "static")
@@ -45,12 +45,17 @@ def bump():
     S.version += 1
 
 
+_persist_lock = threading.Lock()
+
+
 def persist():
-    """Save every incident that changed since it was last saved."""
-    for inc in list(store.incidents.values()):
-        if S.saved.get(inc.id) != inc.updated:
-            S.db.save_incident(inc)
-            S.saved[inc.id] = inc.updated
+    """Save every incident that changed since it was last saved (serialised: called from requests and the loop)."""
+    with _persist_lock:
+        for inc in store.snapshot():
+            if S.saved.get(inc.id) != inc.updated:
+                with store.lock:
+                    S.db.save_incident(inc)  # serialise under the store lock so the JSON is consistent
+                S.saved[inc.id] = inc.updated
 
 
 def _on_status(inc: Incident, status: str, ts: float, reason: str | None, actor: str):
@@ -59,12 +64,16 @@ def _on_status(inc: Incident, status: str, ts: float, reason: str | None, actor:
 
 
 async def lifecycle_loop():
+    last_retention = 0.0
     while True:
         try:
             await asyncio.to_thread(services.tick, store, S.rg)
             await asyncio.to_thread(persist)
-            if any(i.status != "Cleared" for i in store.incidents.values()):
+            if any(i.status != "Cleared" for i in store.snapshot()):
                 bump()  # timers and auto-clear countdowns move even without new input
+            if time.time() - last_retention > 3600:
+                await asyncio.to_thread(S.db.apply_retention, time.time())
+                last_retention = time.time()
         except Exception:
             log.exception("lifecycle tick failed")
         await asyncio.sleep(config.TICK_S)
@@ -73,6 +82,14 @@ async def lifecycle_loop():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     S.rg = RoadGraph.load()
+    if S.rg.mode == "osm":
+        config.CENTER_LAT, config.CENTER_LON = S.rg.centre()
+        store.reset()  # re-place hotspots relative to the real map centre if no hotspots file
+        log.info("OSM road graph: %s", S.rg.stats())
+        if store.hotspot_source == "synthetic":
+            log.warning("No data/hotspots.json: demo hotspots are SIMULATED points placed on real road segments, "
+                        "not known flood locations.")
+    store.place_demo_hotspots(S.rg)
     S.db = Database()
     for inc in S.db.load_open_incidents():
         store.incidents[inc.id] = inc
@@ -83,10 +100,28 @@ async def lifespan(app: FastAPI):
     task = asyncio.create_task(lifecycle_loop())
     yield
     task.cancel()
+    try:
+        await task  # let an in-flight tick finish before the database is closed
+    except asyncio.CancelledError:
+        pass
     fusion.STATUS_HOOKS.remove(_on_status)
+    S.db.close()
 
 
 app = FastAPI(title="RoadPulse API", version="0.1.0", lifespan=lifespan)
+
+
+from fastapi.exceptions import RequestValidationError  # noqa: E402
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_error(request: Request, exc: RequestValidationError):
+    """Readable 422s. Raw input values are not echoed back: they may be huge, or non-finite (NaN/Infinity)
+    and impossible to encode as JSON, which made FastAPI's default handler fail with a 500."""
+    errors = [{"field": ".".join(str(p) for p in e.get("loc", ()) if p != "body"), "message": e.get("msg", "invalid")}
+              for e in exc.errors()]
+    return JSONResponse({"detail": "; ".join(f"{e['field']}: {e['message']}" for e in errors), "errors": errors},
+                        status_code=422)
 
 
 @app.middleware("http")
@@ -128,6 +163,7 @@ def incident_view(inc: Incident, detail: bool = False) -> dict:
         "clearing_in_s": (max(0, round(config.CLEAR_WINDOW_S - (ts - inc.clear_candidate_since)))
                           if inc.clear_candidate_since else None),
         "cleared_reason": inc.cleared_reason, "updated": inc.updated,
+        "simulated": any(s.simulated for s in inc.signals),
         "road": S.rg.road_name(inc.lat, inc.lon),
         "affected_segments": [S.rg.edge_geo(u, v) for u, v in
                               S.rg.edges_near(inc.lat, inc.lon, config.INCIDENT_EDGE_RADIUS_M) if str(u) < str(v)],
@@ -141,13 +177,15 @@ def hotspots_view() -> dict:
     rain, src = forecast.current_rain(store)
     return {"rain_mm_per_hr": rain, "rain_source": src,
             "hotspots": [forecast.countdown(h, rain) | {"sensor_id": h.sensor_id,
-                         "last_reading_age_s": round(now() - h.last_reading) if h.last_reading else None}
+                         "last_reading_age_s": round(now() - h.last_reading) if h.last_reading else None,
+                         "last_reading_simulated": h.last_simulated,
+                         "simulated_location": h.simulated_location}
                          for h in store.hotspots.values()]}
 
 
 def active_published() -> list[Incident]:
     ts = now()
-    return [i for i in store.incidents.values() if services.is_published(i, ts)]
+    return [i for i in store.snapshot() if services.is_published(i, ts)]
 
 
 def _get(incident_id: str) -> Incident:
@@ -155,6 +193,15 @@ def _get(incident_id: str) -> Incident:
     if not inc:
         raise HTTPException(404, "Incident not found")
     return inc
+
+
+def require_on_network(lat: float, lon: float, what: str):
+    """Reject points that are not on (or near) the mapped road network instead of silently snapping them."""
+    d = S.rg.distance_to_network(lat, lon)
+    if d > config.MAX_SNAP_M:
+        far = f"{d:.0f} m" if d < 1000 else f"{d / 1000:.1f} km"
+        raise HTTPException(422, f"{what} is {far} from the nearest mapped road (limit {config.MAX_SNAP_M:.0f} m). "
+                                 f"Pick a point on or near a road inside the map area.")
 
 
 def _changed(*incs: Incident):
@@ -166,8 +213,10 @@ def _changed(*incs: Incident):
 
 @app.get("/api/health")
 def health():
-    return {"ok": True, "graph": S.rg.source, "nodes": S.rg.g.number_of_nodes(), "edges": S.rg.g.number_of_edges(),
-            "incidents_open": sum(1 for i in store.incidents.values() if i.status != "Cleared"),
+    return {"ok": True, "graph": S.rg.source, "map_mode": S.rg.mode, "hotspots_source": store.hotspot_source,
+            "routing": "road-segment",
+            "nodes": S.rg.g.number_of_nodes(), "edges": S.rg.g.number_of_edges(),
+            "incidents_open": sum(1 for i in store.snapshot() if i.status != "Cleared"),
             "center": [config.CENTER_LAT, config.CENTER_LON]}
 
 
@@ -177,7 +226,8 @@ def network():
     for u, v, d in S.rg.g.edges(data=True):
         if str(u) < str(v) or not S.rg.g.has_edge(v, u):
             segs.append({"coords": S.rg.edge_geo(u, v), "speed_kph": d["speed_kph"], "lanes": d["lanes"]})
-    return {"source": S.rg.source, "center": [config.CENTER_LAT, config.CENTER_LON], "segments": segs}
+    return {"source": S.rg.source, "map_mode": S.rg.mode, "hotspots_source": store.hotspot_source,
+            "center": [config.CENTER_LAT, config.CENTER_LON], "segments": segs}
 
 
 @app.get("/api/incidents")
@@ -187,7 +237,7 @@ def list_incidents(scope: str = Query("public", pattern="^(public|all)$"), inclu
         raise HTTPException(401, "Officer login required for scope=all")
     ts = now()
     items = []
-    for inc in sorted(store.incidents.values(), key=lambda i: i.updated, reverse=True):
+    for inc in sorted(store.snapshot(), key=lambda i: i.updated, reverse=True):
         if scope == "public" and not services.is_published(inc, ts):
             continue
         if not include_cleared and inc.status == "Cleared":
@@ -207,6 +257,7 @@ def get_incident(incident_id: str, officer=Depends(optional_officer)):
 @app.post("/api/reports", status_code=201)
 def post_report(r: CitizenReport, request: Request):
     limit(REPORT_LIMIT, "report", request)
+    require_on_network(r.lat, r.lon, "Report location")
     inc = services.handle_report(store, r, S.rg.road_name(r.lat, r.lon))
     S.db.report(r.type, r.lat, r.lon, r.reporter_id, r.note, now())
     _changed(inc)
@@ -218,8 +269,6 @@ def post_report(r: CitizenReport, request: Request):
 @app.post("/api/sensors/readings")
 def post_reading(r: SensorReading, request: Request, device=Depends(require_device)):
     limit(DEVICE_LIMIT, "device", request)
-    if not (0 <= r.depth_cm <= 300):
-        raise HTTPException(422, "depth_cm out of range 0..300")
     res = services.handle_sensor(store, r)
     if not res.get("ok"):
         raise HTTPException(404, res.get("error"))
@@ -231,9 +280,9 @@ def post_reading(r: SensorReading, request: Request, device=Depends(require_devi
 @app.post("/api/probes")
 def post_probe(p: ProbeSample, request: Request, device=Depends(require_device)):
     limit(DEVICE_LIMIT, "device", request)
-    if not (0 <= p.speed_kph <= 150):
-        raise HTTPException(422, "speed_kph out of range")
     res = services.handle_probe(store, S.rg, p)
+    if res.get("edge") is None:
+        raise HTTPException(422, "Probe position is not on a mapped road (more than 40 m from any segment)")
     if res.get("incident"):
         _changed()
     return res
@@ -243,28 +292,52 @@ def post_probe(p: ProbeSample, request: Request, device=Depends(require_device))
 def post_routes(req: RouteRequest, request: Request):
     limit(ROUTE_LIMIT, "route", request)
     ts = now()
-    src = S.rg.nearest_node(req.from_lat, req.from_lon)
-    dst = S.rg.nearest_node(req.to_lat, req.to_lon)
-    if src == dst:
-        raise HTTPException(422, "Origin and destination are the same point")
+    # validate against the nearest road SEGMENT (a point on a long road is valid even if junctions are far),
+    # then compute the path from the nearest graph node
+    require_on_network(req.from_lat, req.from_lon, "Start")
+    require_on_network(req.to_lat, req.to_lon, "Destination")
+    # exact road-segment routing: both ends are inserted on their nearest road segment in a per-request copy
+    g, src, dst, src_pt, dst_pt = routing.graph_with_endpoints(S.rg, req.from_lat, req.from_lon,
+                                                               req.to_lat, req.to_lon)
+    if src is None or dst is None:
+        raise HTTPException(422, "Start or destination is not on a mapped road")
+    if src == dst or haversine_m(*src_pt, *dst_pt) < 10:
+        raise HTTPException(422, "Start and destination are on the same spot of the road; pick points further apart")
     published = active_published()
     effects = incident_effects(S.rg, published)
     speeds = {e: services.observed_speed(store, e, ts) for e in effects}
-    routes = route_alternatives(S.rg, src, dst, req.vehicle, effects, speeds, k=max(1, min(req.alternatives, 4)))
-    # the route a driver would take without RoadPulse, and which incidents it runs into
+    routes = route_alternatives(S.rg, src, dst, req.vehicle, effects, speeds, k=max(1, min(req.alternatives, 4)), g=g)
+    # the route a driver would take without RoadPulse (fastest legal route, incidents unknown)
     import networkx as nx
-    base = nx.shortest_path(weighted_graph(S.rg, req.vehicle, {}), src, dst, weight="w")
-    crossed = {i.id: i.title for e in zip(base, base[1:]) for i in effects.get(e, [])}
+    try:
+        base = nx.shortest_path(g, src, dst, weight=lambda u, v, d: routing.edge_time(S.rg, (u, v), req.vehicle, {}, g=g))
+    except nx.NetworkXNoPath:
+        base = None
+    crossed = {}
+    for a, b in zip(base or [], (base or [])[1:]):
+        root = g.edges[a, b].get("root", (a, b))
+        for i in effects.get(root, []):
+            crossed[i.id] = i.title
     for r in routes:
         r.pop("path", None)
-    return {"vehicle": req.vehicle, "routes": routes, "usual_route": S.rg.path_coords(base),
+    if base is None:
+        raise HTTPException(422, "No legal route between these points on the mapped network (one-way streets or a "
+                                 "disconnected part of the map). Try points on a main road.")
+    return {"vehicle": req.vehicle, "routes": routes, "usual_route": S.rg.path_coords(base, g),
             "usual_route_hits": [{"id": k, "title": v} for k, v in crossed.items()],
-            "no_route": not routes}
+            "snapped": {"start": list(src_pt), "destination": list(dst_pt)},
+            "routing": "road-segment", "no_route": not routes}
 
 
 @app.get("/api/hotspots")
 async def get_hotspots():
     return await asyncio.to_thread(hotspots_view)
+
+
+@app.get("/api/network/stats")
+def network_stats():
+    """Actual statistics of the loaded road graph (after loading rules: curves split, weak component kept)."""
+    return {"source": S.rg.source, "map_mode": S.rg.mode, **S.rg.stats()}
 
 
 @app.get("/api/feed")
@@ -288,12 +361,51 @@ def evaluation(trips: int = Query(400, ge=50, le=2000), seed: int = 7):
     return evaluate.before_after(S.rg, incs, trips, seed)
 
 
+_snap_cache: dict[tuple, tuple[int, str]] = {}
+_snap_lock = asyncio.Lock()
+
+
+async def snapshot_json(officer: bool) -> str:
+    """Build each (version, audience) snapshot once and share it across all connected clients."""
+    key = ("officer" if officer else "public",)
+    cached = _snap_cache.get(key)
+    if cached and cached[0] == S.version:
+        return cached[1]
+    async with _snap_lock:
+        cached = _snap_cache.get(key)
+        if cached and cached[0] == S.version:
+            return cached[1]
+        version = S.version
+        claims = {"role": "officer"} if officer else None
+        snap = {"version": version,
+                "incidents": list_incidents("all" if officer else "public", False, claims)["incidents"],
+                "hotspots": await asyncio.to_thread(hotspots_view)}
+        if officer:
+            snap["events"] = list(store.events)[:30]
+        data = json.dumps(snap)
+        _snap_cache[key] = (version, data)
+        return data
+
+
+@app.post("/api/stream/ticket")
+def stream_ticket(officer=Depends(require_officer)):
+    """Exchange the officer's bearer token (sent in a header) for a one-time, 60-second stream ticket."""
+    return issue_stream_ticket(officer)
+
+
 @app.get("/api/stream")
-async def stream(request: Request, token: str | None = None):
-    """Server-Sent Events: pushes a fresh snapshot whenever anything changes (checked every second)."""
-    officer = verify_token(token) if token else None
+async def stream(request: Request, ticket: str | None = None):
+    """Server-Sent Events: pushes a fresh snapshot whenever anything changes (checked every second).
+    No ticket = public stream. ?ticket= (from POST /api/stream/ticket) = officer stream; a used, expired or unknown
+    ticket gets 401 so the browser fetches a new one instead of silently downgrading to the public stream."""
+    officer = None
+    if ticket is not None:
+        officer = consume_stream_ticket(ticket)
+        if not officer:
+            raise HTTPException(401, "Stream ticket expired or already used; request a new one")
 
     async def gen():
+        yield "retry: 3000\n\n"  # browsers reconnect after 3 s if the connection drops
         last = -1
         beat = 0
         while True:
@@ -301,11 +413,7 @@ async def stream(request: Request, token: str | None = None):
                 break
             if S.version != last:
                 last = S.version
-                snap = {"version": last, "incidents": list_incidents("all" if officer else "public", False, officer)["incidents"],
-                        "hotspots": await asyncio.to_thread(hotspots_view)}
-                if officer:
-                    snap["events"] = list(store.events)[:30]
-                yield f"data: {json.dumps(snap)}\n\n"
+                yield f"data: {await snapshot_json(bool(officer))}\n\n"
             beat += 1
             if beat % 15 == 0:
                 yield ": keep-alive\n\n"
@@ -375,8 +483,7 @@ def incident_action(incident_id: str, action: str, body: ActionBody | None = Non
 
 @app.post("/api/planned-works", status_code=201)
 def planned_works(w: PlannedWork, officer=Depends(require_officer)):
-    if w.ends <= w.starts:
-        raise HTTPException(422, "ends must be after starts")
+    require_on_network(w.lat, w.lon, "Planned works location")
     inc = services.handle_planned(store, w)
     S.db.audit(now(), officer["sub"], "planned_work_created", inc.id, w.model_dump())
     _changed(inc)

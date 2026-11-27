@@ -14,6 +14,7 @@
       <button class="tab active" data-view="commuter">Commuter</button>
       <button class="tab" data-view="authority">Traffic authority</button>
     </nav>
+    <div id="mapmode" class="mapmode hidden"></div>
     <div id="conn" class="conn">connecting…</div>
   </header>
 
@@ -83,6 +84,7 @@
             <label class="grow">Rain (mm/h) override <input id="rain" type="number" min="0" max="200" step="1" placeholder="forecast"></label>
             <button id="btn-rain" class="small">Set</button>
           </div>
+          <p id="rain-source" class="hint"></p>
           <ul id="officer-hotspots" class="list"></ul>
 
           <h2>Decision support</h2>

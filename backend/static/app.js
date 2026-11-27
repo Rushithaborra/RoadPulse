@@ -13,6 +13,7 @@ const state = {
 };
 
 const $ = (id) => document.getElementById(id);
+const SIM = `<span class="badge sim" title="From the demo simulator, not a real sensor or person">SIMULATED</span>`;
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
 function toast(msg, ms = 3500) {
@@ -23,19 +24,34 @@ function toast(msg, ms = 3500) {
 async function api(path, opts = {}) {
   const headers = { "Content-Type": "application/json", ...(opts.headers || {}) };
   if (state.token) headers.Authorization = `Bearer ${state.token}`;
-  const res = await fetch(path, { ...opts, headers });
+  let res;
+  try {
+    res = await fetch(path, { ...opts, headers });
+  } catch (e) {
+    throw new Error("Cannot reach the RoadPulse server. Check that it is running and the network is up.");
+  }
   const body = await res.json().catch(() => ({}));
   if (!res.ok) {
-    if (res.status === 401 && state.token) logout();
-    throw new Error(body.detail || body.error || `HTTP ${res.status}`);
+    if (res.status === 401 && state.token && path !== "/api/auth/login") {
+      logout();
+      throw new Error("Your officer session expired. Please log in again.");
+    }
+    if (res.status === 429) throw new Error("Too many requests. Wait a few seconds and try again.");
+    if (res.status >= 500) throw new Error(`Server error (request ${res.headers.get("X-Request-ID") || "?"}). Check the server log.`);
+    throw new Error(typeof body.detail === "string" ? body.detail : body.error || `Request failed (HTTP ${res.status})`);
   }
   return body;
 }
 
 // ---------------------------------------------------------------- map
 const map = L.map("map", { zoomControl: true });
-L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-  maxZoom: 19, attribution: "&copy; OpenStreetMap contributors",
+// Standard OSM tiles are loaded on demand only while someone views the map (no bulk download / pre-fetch),
+// per the OSM tile usage policy. Attribution links to the OSM copyright page; the road graph is OSM data too.
+map.attributionControl.setPrefix('<a href="https://leafletjs.com" target="_blank" rel="noopener">Leaflet</a>');
+L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+  maxZoom: 19,
+  attribution: 'Map tiles and road data &copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" ' +
+    'rel="noopener">OpenStreetMap contributors</a> (ODbL)',
 }).addTo(map);
 const layers = {
   network: L.layerGroup().addTo(map), incidents: L.layerGroup().addTo(map),
@@ -45,6 +61,14 @@ const layers = {
 async function loadNetwork() {
   const net = await api("/api/network");
   map.setView(net.center, 16);
+  const mm = $("mapmode");
+  mm.classList.remove("hidden");
+  if (net.map_mode === "synthetic") {
+    mm.textContent = "Synthetic demo road network (not real roads)";
+  } else {
+    mm.textContent = net.hotspots_source === "synthetic" ? "Real OpenStreetMap roads · demo hotspots are simulated" : "Real OpenStreetMap roads";
+    mm.classList.add("osm");
+  }
   for (const s of net.segments) {
     L.polyline(s.coords, { color: s.speed_kph >= 40 ? "#7d8590" : "#b8bec7", weight: s.speed_kph >= 40 ? 5 : 3, opacity: 0.7 })
       .addTo(layers.network);
@@ -95,7 +119,7 @@ function drawIncidents() {
 
 function incidentPopup(inc) {
   const blocked = inc.affected_vehicles.length ? inc.affected_vehicles.map((v) => VEHICLE_LABEL[v]).join(", ") : "none";
-  return `<b>${esc(inc.title)}</b><br>${inc.severity}${inc.depth_cm != null ? ` · ${Math.round(inc.depth_cm)} cm` : ""}<br>` +
+  return `${inc.simulated ? "<i>Simulated demo data</i><br>" : ""}<b>${esc(inc.title)}</b><br>${inc.severity}${inc.depth_cm != null ? ` · ${Math.round(inc.depth_cm)} cm` : ""}<br>` +
     `Avoid: ${esc(blocked)}<br><small>${inc.status} · confidence ${inc.confidence.toFixed(2)}</small>`;
 }
 
@@ -139,6 +163,10 @@ function showRoutes(r) {
       `RoadPulse rerouted your ${esc(VEHICLE_LABEL[r.vehicle])}.</div>`;
   }
   if (r.no_route) html += `<div class="alert">No safe route for a ${esc(VEHICLE_LABEL[r.vehicle])} right now.</div>`;
+  if (r.snapped) {
+    L.circleMarker(r.snapped.start, { radius: 4, color: "#1a7f37", fillOpacity: 1 }).bindTooltip("Start, on the road").addTo(layers.routes);
+    L.circleMarker(r.snapped.destination, { radius: 4, color: "#d1242f", fillOpacity: 1 }).bindTooltip("Destination, on the road").addTo(layers.routes);
+  }
   r.routes.forEach((rt, i) => {
     html += `<div class="route" style="border-color:${ROUTE_COLORS[i]}"><b>Route ${i + 1}</b> · ${(rt.time_s / 60).toFixed(1)} min · ` +
       `${(rt.length_m / 1000).toFixed(2)} km<div class="meta">${Math.round(rt.share * 100)}% of drivers sent this way to avoid a new jam</div></div>`;
@@ -150,11 +178,11 @@ function showRoutes(r) {
 function renderPublic() {
   const pub = state.incidents.filter((i) => i.published);
   $("public-incidents").innerHTML = pub.length ? pub.map((i) => `<li>
-      <span class="badge sev-${i.severity}">${i.severity}</span><b>${esc(i.title)}</b>
+      <span class="badge sev-${i.severity}">${i.severity}</span>${i.simulated ? SIM : ""}<b>${esc(i.title)}</b>
       <div class="meta">${i.depth_cm != null ? `${Math.round(i.depth_cm)} cm water · ` : ""}avoid: ${
         i.affected_vehicles.length ? i.affected_vehicles.map((v) => VEHICLE_LABEL[v]).join(", ") : "none"}</div></li>`).join("")
     : `<li class="meta">No verified disruptions right now.</li>`;
-  $("public-hotspots").innerHTML = state.hotspots.map((h) => `<li><b>${esc(h.name)}</b> · ${h.depth_cm} cm
+  $("public-hotspots").innerHTML = state.hotspots.map((h) => `<li>${h.last_reading_simulated || h.simulated_location ? SIM : ""}<b>${esc(h.name)}</b> · ${h.depth_cm} cm
       <div class="meta countdown risk-${h.risk}">${esc(h.message)}</div></li>`).join("");
 }
 
@@ -171,7 +199,7 @@ function renderOfficer(events) {
     const clearing = i.clearing_in_s != null ? ` · <b>auto-clear in ${i.clearing_in_s}s</b>` : "";
     const upcoming = !i.active && i.starts ? ` · starts ${new Date(i.starts * 1000).toLocaleTimeString()}` : "";
     return `<li class="${state.selected === i.id ? "sel" : ""}" data-id="${i.id}">
-      <span class="badge sev-${i.severity}">${i.severity}</span><span class="badge st st-${i.status}">${i.status}</span>
+      <span class="badge sev-${i.severity}">${i.severity}</span><span class="badge st st-${i.status}">${i.status}</span>${i.simulated ? SIM : ""}
       <b>${esc(i.title)}</b>
       <div class="meta">confidence ${i.confidence.toFixed(2)} · ${esc(src)}${i.depth_cm != null ? ` · ${Math.round(i.depth_cm)} cm` : ""}${clearing}${upcoming}</div>
       <div class="meta">${esc(stages)}</div>
@@ -187,7 +215,7 @@ function renderOfficer(events) {
   $("officer-hotspots").innerHTML = state.hotspots.map((h) => {
     const eta = Object.entries(h.eta_min).map(([k, v]) => `${k}: ${v === null ? "–" : v === 0 ? "now" : v + " min"}`).join(" · ");
     const age = h.last_reading_age_s == null ? "no sensor data" : `sensor ${h.last_reading_age_s}s ago`;
-    return `<li><b>${esc(h.name)}</b> · ${h.depth_cm} cm · rise ${h.rise_cm_per_hr} cm/h
+    return `<li>${h.last_reading_simulated || h.simulated_location ? SIM : ""}<b>${esc(h.name)}</b> · ${h.depth_cm} cm · rise ${h.rise_cm_per_hr} cm/h
       <div class="meta countdown risk-${h.risk}">${esc(h.message)}</div><div class="meta">${eta} · ${age}</div></li>`;
   }).join("");
   if (events) $("events").innerHTML = events.map((e) => `<li>${new Date(e.ts * 1000).toLocaleTimeString()} — ${esc(e.text)}</li>`).join("");
@@ -245,14 +273,33 @@ function showDash() {
 }
 
 // ---------------------------------------------------------------- live stream
+// Officer stream: the 8-hour login token never goes in a URL. We exchange it (in a header) for a one-time ticket
+// valid 60 s. If the connection drops, the browser's retry reuses the spent ticket, gets 401 and closes; we then
+// fetch a fresh ticket and reconnect.
 let es = null;
-function connect() {
-  if (es) es.close();
-  const url = state.token && state.view === "authority" ? `/api/stream?token=${encodeURIComponent(state.token)}` : "/api/stream";
-  es = new EventSource(url);
-  es.onopen = () => { $("conn").textContent = "live"; $("conn").classList.add("live"); };
-  es.onerror = () => { $("conn").textContent = "reconnecting…"; $("conn").classList.remove("live"); };
-  es.onmessage = (msg) => {
+let reconnectTimer = null;
+async function connect() {
+  clearTimeout(reconnectTimer);
+  if (es) { es.close(); es = null; }
+  let url = "/api/stream";
+  if (state.token && state.view === "authority") {
+    try {
+      const t = await api("/api/stream/ticket", { method: "POST", body: "{}" });
+      url += `?ticket=${encodeURIComponent(t.ticket)}`;
+    } catch (e) {
+      $("conn").textContent = "offline – retrying"; $("conn").classList.remove("live");
+      reconnectTimer = setTimeout(connect, 3000);
+      return;
+    }
+  }
+  const source = new EventSource(url);
+  es = source;
+  source.onopen = () => { $("conn").textContent = "live"; $("conn").classList.add("live"); };
+  source.onerror = () => {
+    $("conn").textContent = "reconnecting…"; $("conn").classList.remove("live");
+    if (source.readyState === EventSource.CLOSED && es === source) reconnectTimer = setTimeout(connect, 2000);
+  };
+  source.onmessage = (msg) => {
     const snap = JSON.parse(msg.data);
     state.incidents = snap.incidents; state.hotspots = snap.hotspots.hotspots;
     for (const i of state.incidents) {
@@ -264,6 +311,7 @@ function connect() {
     state.firstSnapshot = false;
     drawIncidents(); drawHotspots(); renderPublic();
     if (state.token) renderOfficer(snap.events);
+    $("rain-source").textContent = `Rain now: ${snap.hotspots.rain_mm_per_hr} mm/h (${snap.hotspots.rain_source})`;
     if (state.start && state.end && state.view === "commuter") debounceRoute();
   };
 }

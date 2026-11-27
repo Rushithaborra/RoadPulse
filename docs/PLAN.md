@@ -6,7 +6,10 @@ Full design rationale: "RoadPulse — System Architecture Design v0.1" (team doc
 Report → assess → identify affected road → alternative route → dashboard updates.
 1. Interactive road map (real OSM area or synthetic grid fallback)
 2. Incident reporting: citizen report API/bot, water sensor API, speed probes
-3. Verification + management: confidence fusion, lifecycle Reported → Verified → Responding → Cleared, auto-clear
+3. Verification + management: confidence fusion, lifecycle Reported → Verified → Responding → Cleared, auto-clear.
+   **Verification rule:** auto-verify only when confidence ≥ 0.7 AND at least one trusted source (keyed sensor, keyed
+   fleet probe, planned works, officer). Public reports, however many, count as one untrusted source and never verify
+   on their own. Commuters only see Verified / Responding incidents.
 4. Risk engine: depth → severity, vehicle-class passability, flood countdown
 5. Dynamic alternatives: vehicle-aware, load-balanced routes
 6. Authority dashboard (login required for actions)
@@ -54,9 +57,16 @@ Fleet probes ───────────┘      │          │
 | GET | /api/incidents/{id}/whatif, /signals | officer | decision support |
 | GET | /api/evaluation | – | before/after (simplified model) |
 | GET | /api/feed | – | open incident feed |
-| GET | /api/stream | – | SSE: incident + hotspot updates |
+| POST | /api/stream/ticket | officer | one-time 60 s ticket for the officer stream |
+| GET | /api/stream[?ticket=] | – / ticket | SSE: public snapshot, or officer snapshot with a valid ticket (401 if spent) |
 
 Incident JSON: see `docs/incident_schema.json`.
+Errors: `422 {"detail": "<field>: <message>; ...", "errors": [{"field", "message"}]}` for invalid input, including
+points more than `MAX_SNAP_M` (250 m) from the nearest mapped road segment; `401` login/device key/stream ticket;
+`409` action not allowed in the current state; `429` rate limit. Inputs may carry `"simulated": true` (demo data);
+incidents then report `simulated: true` and the UI labels them.
+
+**MVP frozen 2026-11-27.** No optional features without explicit approval.
 
 ## 5. Decisions (changes vs design doc flagged)
 - Python 3.12+, FastAPI, NetworkX routing, Leaflet frontend **without a build step** (changed from React: no bundler to break in 20 h; teammates edit one HTML/JS app).

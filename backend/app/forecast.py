@@ -8,35 +8,41 @@ import httpx
 from . import config
 from .store import HotspotState, Store
 
-_cache: dict = {"ts": 0.0, "data": None, "error": None}
+_cache: dict = {"ts": 0.0, "data": None, "error": None, "failed_at": 0.0, "good_at": 0.0}
+GOOD_TTL_S = 600        # refresh a good forecast every 10 min
+FAIL_BACKOFF_S = 120    # after a failure, do not call the API again for 2 min (keeps requests fast offline)
+STALE_LIMIT_S = 3 * 3600  # keep using the last good forecast for up to 3 h
 
 
 def fetch_forecast(lat: float, lon: float) -> dict | None:
-    """Next hours of rain in mm/h. Cached for 10 minutes. Returns None if offline."""
-    if time.time() - _cache["ts"] < 600 and _cache["data"] is not None:
+    """Next hours of rain in mm/h. Returns the last good forecast (up to 3 h old) or None."""
+    t = time.time()
+    if _cache["data"] is not None and t - _cache["good_at"] < GOOD_TTL_S:
         return _cache["data"]
+    if t - _cache["failed_at"] < FAIL_BACKOFF_S:
+        return _cache["data"] if _cache["data"] is not None and t - _cache["good_at"] < STALE_LIMIT_S else None
     try:
         r = httpx.get(config.OPEN_METEO_URL, params={
             "latitude": lat, "longitude": lon, "hourly": "precipitation",
             "forecast_days": 1, "timezone": "auto",
-        }, timeout=8)
+        }, timeout=4)
         r.raise_for_status()
         j = r.json()
         times, rain = j["hourly"]["time"], j["hourly"]["precipitation"]
         now_hour = time.strftime("%Y-%m-%dT%H:00", time.localtime())
         idx = next((i for i, t in enumerate(times) if t >= now_hour), 0)
         data = {"next_hours_mm": rain[idx: idx + 6], "source": "open-meteo"}
-        _cache.update(ts=time.time(), data=data, error=None)
+        _cache.update(ts=t, data=data, error=None, good_at=t)
         return data
     except Exception as e:  # network blocked, API down, etc.
-        _cache.update(ts=time.time(), data=None, error=str(e))
-        return None
+        _cache.update(failed_at=t, error=str(e))
+        return _cache["data"] if _cache["data"] is not None and t - _cache["good_at"] < STALE_LIMIT_S else None
 
 
 def current_rain(store: Store) -> tuple[float, str]:
     """Rain intensity for the next hour (mm/h) and where it came from."""
     if store.rain_override is not None:
-        return store.rain_override, "manual override"
+        return store.rain_override, "manual override set by an officer, not a forecast"
     f = fetch_forecast(config.CENTER_LAT, config.CENTER_LON)
     if f and f["next_hours_mm"]:
         return float(f["next_hours_mm"][0]), "open-meteo forecast"
