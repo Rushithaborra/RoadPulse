@@ -5,9 +5,19 @@ Everything the simulator sends is marked **SIMULATED** in the interface. Say so 
 
 ## Before you start (once)
 
+First time only, in the project folder (a fresh checkout or unzip has no virtual environment and no `.env`):
+
 ```powershell
-cd <project folder>
-.venv\Scripts\Activate.ps1
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1          # needs the leading .\ ; if blocked: Set-ExecutionPolicy -Scope Process Bypass
+pip install -r requirements-dev.txt
+Copy-Item .env.example .env
+```
+
+Every time, to start the server:
+
+```powershell
+.\.venv\Scripts\Activate.ps1
 uvicorn app.main:app --app-dir backend --env-file .env --no-access-log --timeout-graceful-shutdown 3
 ```
 

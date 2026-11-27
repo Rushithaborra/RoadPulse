@@ -18,7 +18,7 @@ frontend command. Python 3.12 or newer.
 **Windows (PowerShell)**
 ```powershell
 python -m venv .venv
-.venv\Scripts\Activate.ps1
+.\.venv\Scripts\Activate.ps1         # the leading .\ is required; if blocked: Set-ExecutionPolicy -Scope Process Bypass
 pip install -r requirements-dev.txt
 Copy-Item .env.example .env          # then edit the passwords and keys in .env
 uvicorn app.main:app --app-dir backend --env-file .env --no-access-log --timeout-graceful-shutdown 3
