@@ -62,6 +62,13 @@ revalidate, so this is only needed once.
   drops or goes quiet, a banner says the information may be out of date and the page reconnects by itself.
 - Per-vehicle water-depth limits are **assumed demo values** in `backend/app/config.py`, not safety guidance.
 
+## Alert delivery (commuters, boards, Telegram)
+
+See [`docs/ALERTS.md`](docs/ALERTS.md): how people are warned **by route (not radius)**, **before the last turn-off**,
+before they leave (pre-trip) and again when the road clears, plus the honest limits. Pages: `/commute` (phone page
+with spoken alerts and a simulated drive) and `/board` (simulated roadside display). Story:
+`python simulator/alerts_demo.py --device-key KEY --password PASS`.
+
 ## Demo scenario
 
 The full 10-step hackathon walkthrough, with what to say and what to click, is in [`docs/DEMO.md`](docs/DEMO.md).
@@ -95,7 +102,7 @@ Telugu text is template-based and should be checked by a native speaker.
 |---|---|
 | Public reports (web, Telegram) | Shown to officers as **pending**. Any number of reports counts as **one untrusted source** (reporter ids are client-supplied, so they prove nothing). Never auto-verified. |
 | Keyed water sensor (`X-Device-Key`) | Trusted. Two consecutive readings ≥ 10 cm open an incident; confidence 0.8 verifies it. |
-| Keyed fleet speed probes | Trusted, weight 0.5: verifies only together with other evidence (e.g. 0.5 + report 0.35 = 0.675 stays pending). |
+| Keyed fleet speed probes | **Not trusted**, weight 0.4. Judged per road link from 8+ vehicles against this road's normal speed for this time, ignoring junction zones, and the dip must last 3 minutes (`probe_rules.py`). It raises a *Suspected slowdown* for officers and never publishes on its own (0.4 + report 0.35 = 0.61 stays pending). |
 | Planned works (officer) | Trusted; active during its time window. |
 | Officer **Verify** | Always verifies and publishes. |
 
@@ -132,6 +139,8 @@ HTTP 422. Because one-way streets are kept, some pairs of points have no legal r
 |---|---|---|
 | `backend/app/main.py` | HTTP API, live stream (SSE), lifecycle loop | B |
 | `backend/app/fusion.py`, `services.py`, `severity.py` | confidence fusion, lifecycle, risk rules | B |
+| `backend/app/probe_rules.py` | slowdown detection from many probes (link level, time-of-week baseline, persistence) | B |
+| `backend/app/alerts.py`, `channels.py` | who is warned and when: pre-trip, in-trip, U-turn, all-clear, boards, Telegram | B |
 | `backend/app/db.py`, `security.py` | SQLite persistence, auth, device keys, rate limits | B |
 | `backend/app/forecast.py`, `config.py` | rain forecast, flood countdown, hotspots | B / A |
 | `backend/app/roadgraph.py`, `routing.py`, `evaluate.py` | road graph, vehicle-aware routing, what-if, signals | C |

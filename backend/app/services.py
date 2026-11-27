@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import statistics
 
-from . import config
+from . import config, probe_rules
 from .fusion import ingest, refresh, set_status
 from .geo import haversine_m
 from .models import CitizenReport, Incident, PlannedWork, ProbeSample, SensorReading, Signal, now
@@ -77,22 +77,28 @@ def reward_reporters(store: Store, inc: Incident, confirmed: bool):
 # ---------------- speed probes ----------------
 
 def handle_probe(store: Store, rg: RoadGraph, p: ProbeSample) -> dict:
+    """Record a speed sample. The old per-edge samples are kept for routing and recovery checks; whether this is a
+    slowdown is decided by probe_rules (many vehicles, per road link, normal for this time, must persist)."""
     ts = p.ts or now()
     edge = rg.nearest_edge(p.lat, p.lon, max_m=40)
     if edge is None:
         return {"ok": True, "edge": None}
     with store.lock:
         store.probes[edge].append((ts, p.speed_kph, p.vehicle_id))
-        status = _edge_status(store, rg, edge, ts)
-        if status == "anomaly" and ts - store.probe_last_signal.get(edge, 0) > 60:
-            store.probe_last_signal[edge] = ts
-            (ulat, ulon), (vlat, vlon) = rg.node_latlon(edge[0]), rg.node_latlon(edge[1])
-            sig = Signal(source="probe", type="slowdown", lat=(ulat + vlat) / 2, lon=(ulon + vlon) / 2, ts=ts,
-                         weight=config.SOURCE_WEIGHTS["probe"], source_id=f"edge:{edge[0]}-{edge[1]}",
+        res = probe_rules.update(store, rg, edge, p.vehicle_id, p.lat, p.lon, p.speed_kph, ts)
+        link = res["link"]
+        status = "unknown" if res["status"] == "insufficient" else res["status"]
+        out = {"ok": True, "edge": list(edge), "status": status, "vehicles": res.get("n"),
+               "median_kph": res.get("median"), "normal_kph": res.get("baseline")}
+        if res["status"] == "anomaly" and res["sustained"] and ts - store.probe_last_signal.get(link.key, 0) > 60:
+            store.probe_last_signal[link.key] = ts
+            sig = Signal(source="probe", type="slowdown", lat=res["lat"], lon=res["lon"], ts=ts,
+                         weight=config.SOURCE_WEIGHTS["probe"], source_id=f"link:{link.key[0]}-{link.key[1]}",
+                         note=f"{res['n']} vehicles, median {res['median']} km/h vs normal {res['baseline']}",
                          simulated=p.simulated)
             inc = ingest(store, sig, place=rg.g.edges[edge].get("name") or None)
-            return {"ok": True, "edge": list(edge), "status": status, "incident": inc.id}
-    return {"ok": True, "edge": list(edge), "status": status}
+            out["incident"] = inc.id
+        return out
 
 
 def _recent(store: Store, edge, ts):

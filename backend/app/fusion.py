@@ -115,7 +115,7 @@ def refresh(store: Store, inc: Incident, place: str | None = None):
     if inc.type == "flood" and depths:
         inc.depth_cm = max(depths, key=lambda s: s.ts).depth_cm
         inc.severity = depth_to_severity(inc.depth_cm)
-    elif inc.type != "construction":
+    elif inc.type != "construction" and not inc.severity_set:
         inc.severity = DEFAULT_SEVERITY[inc.type]
     inc.affected_vehicles = blocked_vehicles(inc.type, inc.severity, inc.depth_cm)
     label = TYPE_LABEL[inc.type]

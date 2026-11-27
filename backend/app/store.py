@@ -48,6 +48,14 @@ class Store:
         self.reporter_trust: dict[str, float] = defaultdict(lambda: 1.0)
         self.rain_override: float | None = None
         self.events: deque = deque(maxlen=200)  # activity log for the dashboard
+        # speed-probe rule v2 state, keyed by road LINK (see probe_rules.py)
+        self.link_samples: dict[tuple, deque] = defaultdict(lambda: deque(maxlen=600))
+        self.link_anomaly_since: dict[tuple, float] = {}
+        self.link_state: dict[tuple, str] = {}
+        self.baseline: dict[tuple, tuple[float, int]] = {}   # (link, hour-of-week) -> (normal speed km/h, updates)
+        # alert delivery (see alerts.py)
+        self.subscribers: dict = {}
+        self.alert_log: deque = deque(maxlen=300)             # redacted: no names, no coordinates
 
     def place_demo_hotspots(self, rg) -> None:
         """Move SIMULATED demo hotspots onto the midpoint of a real road segment near their target, so the demo

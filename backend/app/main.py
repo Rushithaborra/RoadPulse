@@ -10,19 +10,20 @@ import time
 import uuid
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI, HTTPException, Query, Request
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import config, evaluate, forecast, fusion, routing, services
+from . import alerts, config, evaluate, forecast, fusion, routing, services
 from .geo import haversine_m
 from .db import Database
-from .models import (CitizenReport, Incident, PlannedWork, ProbeSample, RainOverride, RouteRequest,
-                     SensorReading, Signal, now)
+from .models import (CitizenReport, Dispatch, Severity, Incident, PlannedWork, PositionIn, ProbeSample, RainOverride,
+                     RouteRequest, SensorReading, Signal, SubscriberIn, TripStart, now)
+from .models import PlacesIn
 from .roadgraph import RoadGraph
 from .routing import incident_effects, route_alternatives
-from .security import (DEVICE_LIMIT, REPORT_LIMIT, ROUTE_LIMIT, consume_stream_ticket, issue_stream_ticket,
+from .security import (DEVICE_LIMIT, REPORT_LIMIT, ROUTE_LIMIT, SUBSCRIBE_LIMIT, consume_stream_ticket, issue_stream_ticket,
                        issue_token, limit, optional_officer, require_device, require_officer)
 from .store import store
 
@@ -60,7 +61,24 @@ def persist():
 
 def _on_status(inc: Incident, status: str, ts: float, reason: str | None, actor: str):
     S.db.status_change(inc.id, status, ts, reason, actor)
+    try:
+        alerts.on_status(S.rg, store, inc, status, ts)  # warn (or clear) the people this incident affects
+    except Exception:
+        log.exception("alert delivery failed for %s", inc.id)
     bump()
+
+
+_sub_saved: dict[str, str] = {}
+
+
+def persist_subscribers():
+    """Save subscribers whose data changed (saved places, what they were told). Serialised like incidents."""
+    with _persist_lock:
+        for sub in list(store.subscribers.values()):
+            doc = json.dumps(sub.doc(), sort_keys=True)
+            if _sub_saved.get(sub.id) != doc:
+                S.db.save_subscriber(sub.doc(), now())
+                _sub_saved[sub.id] = doc
 
 
 async def lifecycle_loop():
@@ -68,7 +86,9 @@ async def lifecycle_loop():
     while True:
         try:
             await asyncio.to_thread(services.tick, store, S.rg)
+            await asyncio.to_thread(alerts.tick, S.rg, store)
             await asyncio.to_thread(persist)
+            await asyncio.to_thread(persist_subscribers)
             if any(i.status != "Cleared" for i in store.snapshot()):
                 bump()  # timers and auto-clear countdowns move even without new input
             if time.time() - last_retention > 3600:
@@ -96,6 +116,11 @@ async def lifespan(app: FastAPI):
     for inc in S.db.load_open_incidents():
         store.incidents[inc.id] = inc
         S.saved[inc.id] = inc.updated
+    _sub_saved.clear()
+    for doc in S.db.load_subscribers():
+        sub = alerts.Subscriber.from_doc(doc)
+        store.subscribers[sub.id] = sub
+        _sub_saved[sub.id] = json.dumps(sub.doc(), sort_keys=True)
     fusion.STATUS_HOOKS.append(_on_status)
     log.info("graph=%s nodes=%d edges=%d reloaded_incidents=%d", S.rg.source, S.rg.g.number_of_nodes(),
              S.rg.g.number_of_edges(), len(store.incidents))
@@ -169,12 +194,14 @@ def incident_view(inc: Incident, detail: bool = False) -> dict:
                           if inc.clear_candidate_since else None),
         "cleared_reason": inc.cleared_reason, "updated": inc.updated,
         "simulated": any(s.simulated for s in inc.signals),
+        "people_warned": sum(1 for a in store.alert_log if a["incident_id"] == inc.id and a["kind"] != "clear"),
         "road": S.rg.road_name(inc.lat, inc.lon),
         "affected_segments": [S.rg.edge_geo(u, v) for u, v in
                               S.rg.edges_near(inc.lat, inc.lon, config.INCIDENT_EDGE_RADIUS_M) if str(u) < str(v)],
     }
     if detail:
         d["signals"] = [s.model_dump() for s in inc.signals[-20:]]
+        d["dispatched"] = inc.dispatched
     return d
 
 
@@ -464,11 +491,14 @@ def login(body: Login, request: Request):
     return t
 
 
-def _officer_action(incident_id: str, action: str, officer: dict, reason: str | None = None) -> dict:
+def _officer_action(incident_id: str, action: str, officer: dict, reason: str | None = None,
+                    severity: str | None = None) -> dict:
     inc = _get(incident_id)
     who = officer["sub"]
     ts = now()
     with store.lock:
+        if severity and action in ("verify", "respond") and inc.type != "flood":
+            inc.severity, inc.severity_set = severity, True   # a flood's severity comes from measured depth
         if action == "verify":
             inc.signals.append(Signal(source="officer", type=inc.type, lat=inc.lat, lon=inc.lon, weight=1.0,
                                       source_id=who, note=reason))
@@ -493,15 +523,35 @@ def _officer_action(incident_id: str, action: str, officer: dict, reason: str | 
     return incident_view(inc)
 
 
+# ---------------------------------------------------------------- dispatch (officer)
+
+@app.post("/api/incidents/{incident_id}/dispatch", status_code=201)
+def dispatch(incident_id: str, body: Dispatch, officer=Depends(require_officer)):
+    """Record that police, an ambulance, a tow vehicle, drainage or a marshal was sent. RoadPulse does not call them:
+    this is the control room's checklist, kept with the incident and in the audit log."""
+    inc = _get(incident_id)
+    if inc.status == "Cleared":
+        raise HTTPException(409, "Incident already cleared")
+    ts = now()
+    with store.lock:
+        inc.dispatched.append({"unit": body.unit, "by": officer["sub"], "at": ts, "note": body.note})
+        store.log(ts, f"{inc.title}: {body.unit} dispatched by {officer['sub']}")
+        inc.updated = ts
+    S.db.audit(ts, officer["sub"], "dispatch", inc.id, {"unit": body.unit, "note": body.note})
+    _changed(inc)
+    return {"incident_id": inc.id, "dispatched": inc.dispatched}
+
+
 class ActionBody(BaseModel):
     reason: str | None = None
+    severity: Severity | None = None   # verify / respond: the officer decides, e.g. "Closed" for a fully blocked road
 
 
 @app.post("/api/incidents/{incident_id}/{action}")
 def incident_action(incident_id: str, action: str, body: ActionBody | None = None, officer=Depends(require_officer)):
     if action not in ("verify", "respond", "clear", "reject"):
         raise HTTPException(404, "Unknown action")
-    return _officer_action(incident_id, action, officer, body.reason if body else None)
+    return _officer_action(incident_id, action, officer, body.reason if body else None, body.severity if body else None)
 
 
 @app.post("/api/planned-works", status_code=201)
@@ -556,6 +606,135 @@ def audit(officer=Depends(require_officer)):
     return {"entries": S.db.audit_entries(50)}
 
 
+# ---------------------------------------------------------------- commuters: subscribe, trip, position, alerts
+
+def _sub(sub_id: str, token: str | None) -> alerts.Subscriber:
+    sub = store.subscribers.get(sub_id)
+    if not sub or not alerts.check_token(sub, token):
+        raise HTTPException(401, "Unknown subscriber or wrong token")  # same answer for both: no probing for ids
+    return sub
+
+
+@app.post("/api/subscribers", status_code=201)
+def subscribe(body: SubscriberIn, request: Request):
+    """Sign up for alerts. Consent to location use is required. The returned token is shown once and must be sent as
+    X-Subscriber-Token with every later call."""
+    limit(SUBSCRIBE_LIMIT, "subscribe", request)
+    if body.home_lat is not None:
+        require_on_network(body.home_lat, body.home_lon, "Home")
+    if body.work_lat is not None:
+        require_on_network(body.work_lat, body.work_lon, "Work")
+    sub = alerts.create_subscriber(store, body)
+    persist_subscribers()
+    S.db.audit(now(), f"subscriber:{sub.id}", "subscribe", sub.id)
+    bump()
+    return {"id": sub.id, "token": sub.token, "depart_at": sub.depart_at, "telegram_ready": channels_ready(sub)}
+
+
+def channels_ready(sub) -> bool:
+    from . import channels
+    return bool(sub.telegram_chat and channels.telegram_configured())
+
+
+@app.get("/api/subscribers/{sub_id}")
+def get_subscriber(sub_id: str, x_subscriber_token: str | None = Header(default=None)):
+    return _sub(sub_id, x_subscriber_token).view(full=True)
+
+
+@app.delete("/api/subscribers/{sub_id}")
+def delete_subscriber(sub_id: str, x_subscriber_token: str | None = Header(default=None)):
+    """Erase the commuter's saved places and alert history."""
+    sub = _sub(sub_id, x_subscriber_token)
+    with store.lock:
+        store.subscribers.pop(sub.id, None)
+    S.db.delete_subscriber(sub.id)
+    _sub_saved.pop(sub.id, None)
+    S.db.audit(now(), f"subscriber:{sub.id}", "unsubscribe", sub.id)
+    bump()
+    return {"deleted": True}
+
+
+@app.post("/api/subscribers/{sub_id}/places")
+def set_places(sub_id: str, body: PlacesIn, x_subscriber_token: str | None = Header(default=None)):
+    sub = _sub(sub_id, x_subscriber_token)
+    if body.home_lat is not None:
+        require_on_network(body.home_lat, body.home_lon, "Home")
+    if body.work_lat is not None:
+        require_on_network(body.work_lat, body.work_lon, "Work")
+    with store.lock:
+        if body.home_lat is not None:
+            sub.home = (body.home_lat, body.home_lon)
+        if body.work_lat is not None:
+            sub.work = (body.work_lat, body.work_lon)
+        if body.depart_hhmm:
+            sub.depart_hhmm = body.depart_hhmm
+            sub.depart_at = alerts.next_departure(body.depart_hhmm, now())
+    persist_subscribers()
+    return sub.view(full=True)
+
+
+@app.post("/api/subscribers/{sub_id}/trip")
+def start_trip(sub_id: str, body: TripStart, x_subscriber_token: str | None = Header(default=None)):
+    sub = _sub(sub_id, x_subscriber_token)
+    dest = None
+    if body.dest:
+        dest = sub.work if body.dest == "work" else sub.home
+        if dest is None:
+            raise HTTPException(422, f"No saved {body.dest} location")
+    elif body.lat is not None:
+        require_on_network(body.lat, body.lon, "Destination")
+        dest = (body.lat, body.lon)
+    with store.lock:
+        if dest is not None:
+            sub.dest = tuple(dest)
+        if body.depart_in_min is not None:
+            sub.depart_at = now() + body.depart_in_min * 60
+    persist_subscribers()
+    alerts.tick(S.rg, store)  # a pre-trip alert may be due right away
+    return sub.view(full=True)
+
+
+@app.post("/api/subscribers/{sub_id}/position")
+def post_position(sub_id: str, p: PositionIn, request: Request,
+                  x_subscriber_token: str | None = Header(default=None)):
+    """Live location while travelling. The route is checked against every published incident; if the turn-off is near
+    the alert is returned here and also kept in the inbox."""
+    sub = _sub(sub_id, x_subscriber_token)
+    ts = p.ts or now()
+    if S.rg.distance_to_network(p.lat, p.lon) > config.MAX_SNAP_M:
+        return {"on_map": False, "alert": None}
+    with store.lock:
+        sub.last_pos = {"lat": p.lat, "lon": p.lon, "ts": ts, "speed_kph": p.speed_kph}
+    alert = alerts.evaluate_in_trip(S.rg, store, sub, ts)
+    if alert:
+        persist_subscribers()
+        bump()
+    return {"on_map": True, "alert": alert}
+
+
+@app.get("/api/subscribers/{sub_id}/alerts")
+def subscriber_alerts(sub_id: str, since: float = 0.0, x_subscriber_token: str | None = Header(default=None)):
+    sub = _sub(sub_id, x_subscriber_token)
+    return {"alerts": [a for a in sub.inbox if a["ts"] > since], "now": now()}
+
+
+# ---------------------------------------------------------------- boards (simulated roadside displays)
+
+@app.get("/api/boards")
+def list_boards():
+    incs = alerts.published(store, now())
+    return {"boards": [alerts.board_view(S.rg, b, incs) for b in alerts.boards(S.rg)],
+            "note": "SIMULATED displays: a real board needs hardware, power and a data link"}
+
+
+@app.get("/api/boards/{board_id}")
+def get_board(board_id: str):
+    b = next((x for x in alerts.boards(S.rg) if x["id"] == board_id), None)
+    if not b:
+        raise HTTPException(404, "Unknown board")
+    return alerts.board_view(S.rg, b, alerts.published(store, now()))
+
+
 # ---------------------------------------------------------------- frontend
 
 if os.path.isdir(STATIC_DIR):
@@ -571,3 +750,13 @@ def favicon():
 @app.get("/")
 def index():
     return FileResponse(os.path.join(STATIC_DIR, "index.html"))
+
+
+@app.get("/commute", include_in_schema=False)
+def commute_page():
+    return FileResponse(os.path.join(STATIC_DIR, "commute.html"))
+
+
+@app.get("/board", include_in_schema=False)
+def board_page():
+    return FileResponse(os.path.join(STATIC_DIR, "board.html"))

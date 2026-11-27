@@ -23,6 +23,9 @@ def client(tmp_path, monkeypatch):
     from app.store import store
     S.saved = {}
     store.reset()
+    from app import security
+    for lim in (security.REPORT_LIMIT, security.DEVICE_LIMIT, security.ROUTE_LIMIT, security.SUBSCRIBE_LIMIT):
+        lim.state.clear()  # buckets are per IP and global: a previous test must not rate-limit this one
     with TestClient(app) as c:  # lifespan opens the database on enter and closes it on exit
         yield c
     store.reset()

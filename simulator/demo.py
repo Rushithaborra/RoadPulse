@@ -80,11 +80,16 @@ class Demo:
         r.raise_for_status()
         print(f"    simulated sensor-01 depth {cm} cm → incident {r.json().get('incident')}")
 
-    def probes(self, lat, lon, kph, n=4, tag="veh"):
-        for i in range(n):
-            self.c.post("/api/probes", json={"vehicle_id": f"{tag}-{i}", "lat": lat, "lon": lon, "speed_kph": kph,
-                                                  "simulated": True},
-                        headers=self.dev)
+    def probes(self, lat, lon, kph, n=10, tag="veh", sustained=False):
+        """Fleet speed samples. The detection rule needs MANY distinct vehicles (8+), and a slowdown must last longer
+        than a signal cycle (3 min), so a slow batch is sent twice: once dated 4 minutes ago, once now."""
+        batches = [time.time() - 240, time.time()] if sustained else [None]
+        for ts in batches:
+            for i in range(n):
+                body = {"vehicle_id": f"{tag}-{i}", "lat": lat, "lon": lon, "speed_kph": kph, "simulated": True}
+                if ts:
+                    body["ts"] = ts
+                self.c.post("/api/probes", json=body, headers=self.dev)
 
     def flood(self):
         self.pause("Step 1: heavy rain forecast for the area")
@@ -105,11 +110,11 @@ class Demo:
     def accident(self):
         self.pause("Step 4: an accident elsewhere (simulated speed drop + report)")
         lat, lon = self.on_road(-150, -75)  # a side street west of the centre
-        self.probes(lat, lon, 3, n=4, tag="bus")
+        self.probes(lat, lon, 3, tag="bus", sustained=True)
         r = self.c.post("/api/reports", json={"type": "accident", "lat": lat, "lon": lon, "reporter_id": "tg-demo-2",
                                               "simulated": True})
         print(f"    accident report → {r.json()}")
-        print("    (a speed drop + one public report is not enough to auto-verify: an officer must verify it)")
+        print("    (sustained slow traffic + one public report is not enough to publish: an officer must verify it)")
 
     def works(self):
         self.pause("Planned works: pipeline digging on a side road for 4 hours")
@@ -127,9 +132,9 @@ class Demo:
             for cm in (28, 20, 12, 6, 3):
                 self.depth(cm)
                 time.sleep(self.a.step)
-        self.probes(self.hs["lat"], self.hs["lon"], 38, n=4, tag="car")
+        self.probes(self.hs["lat"], self.hs["lon"], 38, tag="car")
         lat, lon = self.on_road(-150, -75)
-        self.probes(lat, lon, 24, n=4, tag="bus")
+        self.probes(lat, lon, 24, tag="bus")
         print("    incidents will auto-clear after the clear window (CLEAR_WINDOW_S, default 120 s)")
 
     def story(self):
@@ -230,7 +235,7 @@ class Demo:
             for cm in (28, 20, 12, 6, 3):
                 self.depth(cm)
                 time.sleep(self.a.step)
-        self.probes(self.hs["lat"], self.hs["lon"], 38, n=4, tag="car")
+        self.probes(self.hs["lat"], self.hs["lon"], 38, tag="car")
         print("    recovery evidence sent (SIMULATED)")
 
 
