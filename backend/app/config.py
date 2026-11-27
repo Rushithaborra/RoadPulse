@@ -69,7 +69,8 @@ INCIDENT_EDGE_RADIUS_M = _f("INCIDENT_EDGE_RADIUS_M", 50)
 # Flood hotspots.
 # Real deployment: put surveyed locations in data/hotspots.json (see docs/hotspots.example.json); they are used as-is.
 # Without that file, two SIMULATED demo hotspots are placed at the midpoint of a real two-way road segment near
-# the offsets below (on whichever map is loaded). They are demonstration points, not known flood locations.
+# the offsets below (on whichever map is loaded), preferring a named road with a diversion
+# (Store.place_demo_hotspots). They are demonstration points, not known flood locations.
 HOTSPOTS_PATH = os.getenv("HOTSPOTS_PATH", os.path.join(os.path.dirname(__file__), "..", "..", "data", "hotspots.json"))
 SYNTHETIC_HOTSPOTS = [
     {

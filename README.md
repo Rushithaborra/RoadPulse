@@ -31,8 +31,10 @@ python simulator/demo.py all                 # step by step, press Enter between
 python simulator/demo.py all --auto          # no pauses
 python simulator/demo.py all --no-sensor     # when the real ESP32 is connected
 ```
-1. Commuter view: pick **Two-wheeler**, click a start on the road a little south of *Demo hotspot A* (the circle on
-   the map) and a destination north of it, on the same road.
+1. Commuter view: pick **Two-wheeler**, click a start on the road on one side of *Demo hotspot A* (the circle on
+   the map) and a destination on the other side, on the same road. On the shipped Dwaraka Nagar map the hotspot is on
+   *4 th Lane Dwaraka nagar*: the direct 106 m ride becomes a 299 m or 362 m diversion (depending on direction) once
+   the water passes 10 cm.
 2. Run the scenario: rain is set, water rises, the sensor incident is verified, the bike route changes live.
    Switch the vehicle to **Bus**: the bus is still allowed through at 35 cm.
 3. Authority view: log in. The accident (speed drop + one public report) is **pending**: verify it, then approve the
@@ -70,8 +72,12 @@ The header shows which one is running; `/api/health` reports `map_mode` (`osm` o
 - **Synthetic (fallback, no internet needed):** a 9×9 grid around the centre with deliberately artificial names.
 
 **Demo hotspots are simulated.** Without a surveyed `data/hotspots.json`, the two demo hotspots are placed at the
-midpoint of a real two-way road segment near the centre and named "Demo hotspot A (simulated) · <road>". They are
-demonstration points, **not known flood locations**; the UI marks them SIMULATED.
+midpoint of a real road segment near the centre and named "Demo hotspot A (simulated) · <road>". They are
+demonstration points, **not known flood locations**; the UI marks them SIMULATED. The segment is chosen by rule, not
+by a hard-coded coordinate (`Store.place_demo_hotspots`), in this order: a **named** road; **two-way** (one-way roads
+are never used); at least 60 m long; severe waterlogging there leaves a **diversion for a two-wheeler** of at most
+800 m in both directions; both ends join real junctions; then the closest to the target spot. If nothing meets a rule
+the rule is dropped in that order, and the last resort is an unnamed two-way road, shown as "unnamed road".
 
 **Routing is road-segment exact.** The start and destination are projected onto their nearest road segment
 (limit `MAX_SNAP_M`, 250 m) and temporary split points are inserted into a per-request copy of the graph, so a route
@@ -115,9 +121,9 @@ Users share a location, pick what they see, and can send `/alerts`.
 
 ## Tests and quality
 ```bash
-python -m pytest -q tests          # 64 tests: domain rules, full report → reroute → dashboard → auto-clear chain,
-                                   # OSM graph loading, road-segment routing, and regression tests for every
-                                   # issue found in the engineering reviews
+python -m pytest -q tests          # 76 tests: domain rules, full report → reroute → dashboard → auto-clear chain,
+                                   # OSM graph loading, road-segment routing, demo hotspot placement on the real
+                                   # map, and regression tests for every issue found in the engineering reviews
 ```
 CI (`.github/workflows/ci.yml`) runs the tests and a Docker smoke test on every push and pull request.
 
