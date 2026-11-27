@@ -163,7 +163,7 @@ class TestSpeedRule:
         probe_batch(client, "n0_-3", "n0_-2", 2, 10, now - 240, t_along=0.7, tag="a")
         res = probe_batch(client, "n0_-3", "n0_-2", 2, 10, now, t_along=0.7, tag="b")
         inc = next(i for i in incidents_all(client, officer_headers) if i["id"] == next(r["incident"] for r in res if r.get("incident")))
-        (alat, alon), (blat, blon) = ll("n0_-3"), ll("n0_-2")
+        (_, alon), (_, blon) = ll("n0_-3"), ll("n0_-2")
         assert inc["lon"] == pytest.approx(alon + (blon - alon) * 0.7, abs=1e-4)
 
 

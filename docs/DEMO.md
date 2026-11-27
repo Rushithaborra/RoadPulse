@@ -1,5 +1,7 @@
 # RoadPulse demo script (about 6 minutes)
 
+> **Which screens?** This 10-step script uses the detailed dashboard at **`/classic`** (Commuter and Traffic authority tabs). The newer phone-first apps are the commuter app at `/`, the control room at `/control` and the traffic police app at `/police`; see `docs/ALERTS.md` and `python simulator/alerts_demo.py` for that story.
+
 Pilot area: Dwaraka Nagar and the RTC Complex (Dwaraka Bus Station), Visakhapatnam, on real OpenStreetMap roads.
 Everything the simulator sends is marked **SIMULATED** in the interface. Say so out loud.
 

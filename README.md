@@ -80,7 +80,7 @@ Staff logins: `OFFICER_USERS` (control room) and `POLICE_USERS` (police), in `.e
 
 See [`docs/ALERTS.md`](docs/ALERTS.md): how people are warned **by route (not radius)**, **before the last turn-off**,
 before they leave (pre-trip) and again when the road clears, plus the honest limits. Pages: `/commute` (phone page
-with spoken alerts and a simulated drive) and `/board` (simulated roadside display). Story:
+with spoken alerts and a demo drive) and `/board` (simulated roadside display). Story:
 `python simulator/alerts_demo.py --device-key KEY --password PASS`.
 
 ## Demo scenario

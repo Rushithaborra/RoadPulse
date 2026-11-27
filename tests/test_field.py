@@ -1,10 +1,6 @@
 """Two-step validation: a citizen report is checked by traffic police on the ground, then confirmed by the control room.
 (tests/conftest.py switches the rule off for the older tests; these switch it back on.)"""
-import time
-
 import pytest
-
-from conftest import DEV
 
 
 @pytest.fixture(autouse=True)
@@ -211,3 +207,22 @@ class TestPlaceSearch:
     def test_names_that_start_with_the_search_come_first(self, client):
         names = [p["name"] for p in client.get("/api/places?q=synthetic s").json()["places"]]
         assert names and all(n.lower().startswith("synthetic s") for n in names[:3])
+
+
+class TestPublicPrivacy:
+    def test_the_public_feed_never_shows_police_or_warning_state(self, client, officer_headers):
+        iid = report(client)
+        client.post(f"/api/incidents/{iid}/verify", json={"severity": "Closed", "urgent": True}, headers=officer_headers)
+        pub = public(client)[0]
+        for key in ("needs_field", "field_state", "urgent", "field_severity", "people_warned", "assignments", "field_reports", "requests", "dispatched"):
+            assert key not in pub, key
+        staff = client.get("/api/incidents?scope=all", headers=officer_headers).json()["incidents"][0]
+        assert staff["field_state"] == "none" and staff["urgent"] is True and "people_warned" in staff
+
+    def test_police_cannot_report_on_a_call_that_is_already_closed(self, client, officer_headers):
+        iid = report(client)
+        client.post(f"/api/incidents/{iid}/assign", json={"unit": "unit12"}, headers=officer_headers)
+        p = police(client)
+        client.post(f"/api/incidents/{iid}/reject", json={}, headers=officer_headers)
+        r = client.post(f"/api/police/calls/{iid}/report", json={"finding": "blocked"}, headers=p)
+        assert r.status_code == 409
