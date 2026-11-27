@@ -9,7 +9,12 @@ import threading
 
 from .models import Incident
 
-DB_PATH = os.getenv("DATABASE_PATH", os.path.join(os.path.dirname(__file__), "..", "..", "data", "roadpulse.db"))
+DEFAULT_DB_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "data", "roadpulse.db")
+
+
+def default_db_path() -> str:
+    """Resolved when a Database is created (not at import), so DATABASE_PATH can change per run or per test."""
+    return os.getenv("DATABASE_PATH", DEFAULT_DB_PATH)
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS incidents (
@@ -36,7 +41,8 @@ CREATE TABLE IF NOT EXISTS audit_log (
 
 
 class Database:
-    def __init__(self, path: str = DB_PATH):
+    def __init__(self, path: str | None = None):
+        path = path or default_db_path()
         self.path = os.path.abspath(path)
         if self.path != ":memory:" and not path == ":memory:":
             os.makedirs(os.path.dirname(self.path), exist_ok=True)
@@ -48,7 +54,8 @@ class Database:
         self.conn.commit()
 
     def close(self):
-        """Release the file handle (needed on Windows, where an open database file cannot be deleted)."""
+        """Release the file handle (needed on Windows, where an open database file cannot be deleted).
+        Safe to call twice. Closing the last connection also checkpoints and removes the -wal/-shm files."""
         with self._lock:
             self.conn.close()
 
