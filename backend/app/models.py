@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 IncidentType = Literal["flood", "accident", "blockage", "construction", "slowdown"]
 Severity = Literal["Low", "Medium", "Severe", "Closed"]
 Status = Literal["Reported", "Verified", "Responding", "Cleared"]
-Source = Literal["sensor", "probe", "cctv", "report", "planned", "officer"]
+Source = Literal["sensor", "probe", "cctv", "report", "planned", "officer", "field"]
 VehicleClass = Literal["two_wheeler", "auto", "car", "ambulance", "bus"]
 
 SEVERITY_ORDER = {"Low": 0, "Medium": 1, "Severe": 2, "Closed": 3}
@@ -59,6 +59,14 @@ class Incident(BaseModel):
     hotspot_id: Optional[str] = None
     dispatched: list[dict] = Field(default_factory=list)  # units sent by an officer: {unit, by, at}
     severity_set: bool = False  # an officer chose the severity (e.g. road fully closed); rules no longer override it
+    # field validation (see field.py)
+    assignments: list[dict] = Field(default_factory=list)    # police units sent to check: {unit, status, by, at, history}
+    field_reports: list[dict] = Field(default_factory=list)  # what police saw: {unit, finding, need, note, at}
+    requests: list[dict] = Field(default_factory=list)       # help police asked for: {unit, kind, at}
+    field_confirmed_at: Optional[float] = None               # police confirmed it is real (blocked / one lane)
+    field_severity: Optional[str] = None                     # the severity police suggest
+    field_open_at: Optional[float] = None                    # police say the road is open again
+    urgent: bool = False                                     # the control room published without waiting for police
 
 
 # ---- API inputs (validated at the model level) ----
@@ -228,3 +236,25 @@ class PlacesIn(BaseModel):
         if all(v is None for v in (self.home_lat, self.work_lat, self.depart_hhmm)):
             raise ValueError("nothing to change")
         return self
+
+
+AssignStatus = Literal["accepted", "declined", "on_way", "arrived", "scene_safe"]
+
+
+class AssignIn(BaseModel):
+    unit: ShortId
+
+
+class CallStatusIn(BaseModel):
+    status: AssignStatus
+
+
+class FieldReportIn(BaseModel):
+    finding: Literal["blocked", "one_lane", "not_real", "open"]
+    need: list[Literal["ambulance", "tow"]] = Field(default_factory=list, max_length=2)
+    note: Optional[str] = Field(default=None, max_length=200)
+
+
+class UnitPositionIn(BaseModel):
+    lat: Lat
+    lon: Lon

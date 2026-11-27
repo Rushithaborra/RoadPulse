@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>RoadPulse — control room</title>
+  <meta name="theme-color" content="#2563eb">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%232563eb'/%3E%3Crect x='14' y='30' width='36' height='5' rx='2.5' fill='white'/%3E%3C/svg%3E">
+  <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%232563eb'/%3E%3Crect x='14' y='30' width='36' height='5' rx='2.5' fill='white'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/static/vendor/leaflet/leaflet.css">
+  <link rel="stylesheet" href="/static/rp.css">
+  <style>
+    .topbar { position: fixed; z-index: 550; top: 12px; left: 12px; right: 12px; display: flex; gap: 10px; align-items: center; pointer-events: none; }
+    .topbar > * { pointer-events: auto; } .counts { flex: 1; display: flex; gap: 8px; align-items: center; padding: 8px 12px; border-radius: 999px; background: var(--card); box-shadow: var(--shadow); min-width: 0; flex-wrap: wrap; }
+    .counts b { font-size: 17px; } .counts .sep { color: var(--line); }
+    @media (min-width: 900px) { .topbar { right: auto; width: 400px; left: 16px; } .side { position: fixed; right: 12px; top: 12px; bottom: auto; } }
+    .side { display: flex; flex-direction: column; gap: 10px; }
+    .unit { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 14px; }
+  </style>
+</head>
+<body>
+  <div id="map" aria-label="Road map"></div>
+  <div class="topbar">
+    <div class="counts" id="counts"><b>Control room</b></div>
+  </div>
+  <div class="side">
+    <button id="btn-sound" class="round" aria-label="Sound alert for new reports" title="Sound alert for new reports"></button>
+    <button id="btn-style" class="round" aria-label="Switch between map and satellite"></button>
+  </div>
+  <div class="legend" aria-label="What the colours mean"><span><i style="background:#d9a400"></i>Minor</span><span><i style="background:#ef7d00"></i>Slow</span><span><i style="background:#d92d20"></i>Very slow</span><span><i style="background:#7a1fa2"></i>Blocked</span></div>
+  <section id="sheet" class="sheet" aria-label="Control room">
+    <div id="grab" class="grab" role="button" tabindex="0" aria-label="Make the panel bigger or smaller"></div>
+    <div id="body" class="sheet-body"></div>
+  </section>
+  <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
+  <script src="/static/vendor/leaflet/leaflet.js"></script>
+  <script src="/static/rp.js"></script>
+  <script src="/static/control.js"></script>
+</body>
+</html>

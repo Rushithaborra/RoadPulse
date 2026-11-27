@@ -23,10 +23,13 @@ TOKEN_TTL_S = 8 * 3600
 if not os.getenv("OFFICER_USERS"):
     os.environ["OFFICER_USERS"] = f"officer:{secrets.token_urlsafe(9)}"
     log.warning("OFFICER_USERS not set. Generated login for this run -> %s", os.environ["OFFICER_USERS"])
+if not os.getenv("POLICE_USERS"):   # traffic police in the field: "unit12:pass,unit7:pass"
+    os.environ["POLICE_USERS"] = f"unit1:{secrets.token_urlsafe(9)}"
+    log.warning("POLICE_USERS not set. Generated field login for this run -> %s", os.environ["POLICE_USERS"])
 if not os.getenv("DEVICE_KEYS"):
     os.environ["DEVICE_KEYS"] = secrets.token_urlsafe(12)
     log.warning("DEVICE_KEYS not set. Generated device key for this run -> %s", os.environ["DEVICE_KEYS"])
-for _var in ("OFFICER_USERS", "DEVICE_KEYS", "ROADPULSE_SECRET"):
+for _var in ("OFFICER_USERS", "POLICE_USERS", "DEVICE_KEYS", "ROADPULSE_SECRET"):
     if "change-me" in os.getenv(_var, ""):
         log.warning("%s still contains a 'change-me' placeholder; set real values before sharing the server", _var)
 
@@ -43,7 +46,15 @@ def _users() -> dict[str, tuple[str, str]]:
         if ":" in pair:
             u, p = pair.split(":", 1)
             out[u.strip()] = (p.strip(), "supervisor" if u.strip().startswith("supervisor") else "officer")
+    for pair in os.environ.get("POLICE_USERS", "").split(","):
+        if ":" in pair:
+            u, p = pair.split(":", 1)
+            out.setdefault(u.strip(), (p.strip(), "police"))   # an officer name is never downgraded to police
     return out
+
+
+def police_units() -> list[str]:
+    return sorted(u for u, (_, role) in _users().items() if role == "police")
 
 
 DEVICE_KEYS = {k.strip() for k in os.environ["DEVICE_KEYS"].split(",") if k.strip()}
@@ -89,9 +100,20 @@ def require_officer(authorization: str | None = Header(default=None)) -> dict:
 
 
 def optional_officer(authorization: str | None = Header(default=None)) -> dict | None:
+    """Control-room claims only: a field police token must not unlock the control room's view."""
     if not authorization or not authorization.lower().startswith("bearer "):
         return None
-    return verify_token(authorization.split(" ", 1)[1])
+    claims = verify_token(authorization.split(" ", 1)[1])
+    return claims if claims and claims.get("role") in ("officer", "supervisor") else None
+
+
+def require_police(authorization: str | None = Header(default=None)) -> dict:
+    if not authorization or not authorization.lower().startswith("bearer "):
+        raise HTTPException(401, "Sign in as traffic police")
+    claims = verify_token(authorization.split(" ", 1)[1])
+    if not claims or claims.get("role") != "police":
+        raise HTTPException(401, "Invalid or expired token")
+    return claims
 
 
 def require_device(x_device_key: str | None = Header(default=None)) -> str:

@@ -15,16 +15,16 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import alerts, config, evaluate, forecast, fusion, routing, services
+from . import alerts, config, evaluate, field, forecast, fusion, routing, services
 from .geo import haversine_m
 from .db import Database
 from .models import (CitizenReport, Dispatch, Severity, Incident, PlannedWork, PositionIn, ProbeSample, RainOverride,
                      RouteRequest, SensorReading, Signal, SubscriberIn, TripStart, now)
-from .models import PlacesIn
+from .models import AssignIn, CallStatusIn, FieldReportIn, PlacesIn, UnitPositionIn
 from .roadgraph import RoadGraph
 from .routing import incident_effects, route_alternatives
 from .security import (DEVICE_LIMIT, REPORT_LIMIT, ROUTE_LIMIT, SUBSCRIBE_LIMIT, consume_stream_ticket, issue_stream_ticket,
-                       issue_token, limit, optional_officer, require_device, require_officer)
+                       issue_token, limit, optional_officer, police_units, require_device, require_officer, require_police)
 from .store import store
 
 log = logging.getLogger("roadpulse")
@@ -165,7 +165,7 @@ async def request_log(request: Request, call_next):
                  (time.perf_counter() - t0) * 1000)
     resp.headers["X-Request-ID"] = rid
     p = request.url.path
-    if p == "/" or p.startswith("/static/"):
+    if p in ("/", "/classic", "/commute", "/board", "/control", "/police") or p.startswith("/static/"):
         resp.headers["Cache-Control"] = "no-cache"  # revalidate (ETag) so a redeployed UI is never served stale
     return resp
 
@@ -194,6 +194,8 @@ def incident_view(inc: Incident, detail: bool = False) -> dict:
                           if inc.clear_candidate_since else None),
         "cleared_reason": inc.cleared_reason, "updated": inc.updated,
         "simulated": any(s.simulated for s in inc.signals),
+        "needs_field": field.needs_field(inc), "field_state": field.field_state(inc), "urgent": inc.urgent,
+        "field_severity": inc.field_severity,
         "people_warned": sum(1 for a in store.alert_log if a["incident_id"] == inc.id and a["kind"] != "clear"),
         "road": S.rg.road_name(inc.lat, inc.lon),
         "affected_segments": [S.rg.edge_geo(u, v) for u, v in
@@ -202,6 +204,9 @@ def incident_view(inc: Incident, detail: bool = False) -> dict:
     if detail:
         d["signals"] = [s.model_dump() for s in inc.signals[-20:]]
         d["dispatched"] = inc.dispatched
+        d["assignments"] = inc.assignments
+        d["field_reports"] = inc.field_reports
+        d["requests"] = [r for r in inc.requests if not r.get("done")]
     return d
 
 
@@ -362,19 +367,56 @@ def post_routes(req: RouteRequest, request: Request):
     except nx.NetworkXNoPath:
         base = None
     crossed = {}
+    usual_time = 0.0
     for a, b in zip(base or [], (base or [])[1:]):
         root = g.edges[a, b].get("root", (a, b))
+        usual_time += routing.edge_time(S.rg, (a, b), req.vehicle, {}, g=g) or 0.0   # the way they would go, no incidents
         for i in effects.get(root, []):
-            crossed[i.id] = i.title
+            crossed[i.id] = i
     for r in routes:
         r.pop("path", None)
     if base is None:
         raise HTTPException(422, "No legal route between these points on the mapped network (one-way streets or a "
                                  "disconnected part of the map). Try points on a main road.")
     return {"vehicle": req.vehicle, "routes": routes, "usual_route": S.rg.path_coords(base, g),
-            "usual_route_hits": [{"id": k, "title": v} for k, v in crossed.items()],
+            "usual_route_hits": [{"id": k, "title": v.title, "type": v.type, "severity": v.severity,
+                                 "road": S.rg.road_name(v.lat, v.lon)} for k, v in crossed.items()],
+            "usual_time_s": round(usual_time),
             "snapped": {"start": list(src_pt), "destination": list(dst_pt)},
             "routing": "road-segment", "no_route": not routes}
+
+
+LANDMARKS = [{"name": "RTC Complex (Dwaraka Bus Station)", "lat": 17.7238639, "lon": 83.3068879, "kind": "place"}]
+
+
+def _places_index() -> list[dict]:
+    idx = S.rg.__dict__.get("_places")
+    if idx is None:
+        groups: dict[str, list] = {}
+        for u, v, d in S.rg.g.edges(data=True):
+            if d.get("name"):
+                (a, b), (c, e) = S.rg.node_latlon(u), S.rg.node_latlon(v)
+                groups.setdefault(d["name"], []).append(((a + c) / 2, (b + e) / 2))
+        roads = []
+        for name, pts in groups.items():
+            clat, clon = sum(p[0] for p in pts) / len(pts), sum(p[1] for p in pts) / len(pts)
+            lat, lon = min(pts, key=lambda p: (p[0] - clat) ** 2 + (p[1] - clon) ** 2)   # a point ON the road, near its middle
+            roads.append({"name": name, "lat": lat, "lon": lon, "kind": "road"})
+        c = S.rg.centre()
+        near = [x for x in LANDMARKS if S.rg.distance_to_network(x["lat"], x["lon"]) <= config.MAX_SNAP_M]
+        idx = [{"name": "Dwaraka Nagar (centre)", "lat": c[0], "lon": c[1], "kind": "place"}] + near + sorted(roads, key=lambda r: r["name"].lower())
+        S.rg.__dict__["_places"] = idx
+    return idx
+
+
+@app.get("/api/places")
+def places(q: str = Query("", max_length=60), limit: int = Query(8, ge=1, le=20)):
+    """Search roads and landmarks by name so people can pick a start and a destination without tapping the map."""
+    q = q.strip().lower()
+    idx = _places_index()
+    hits = [p for p in idx if q in p["name"].lower()] if q else idx
+    hits.sort(key=lambda p: (not p["name"].lower().startswith(q), p["name"].lower()))   # names that START with it first
+    return {"places": hits[:limit]}
 
 
 @app.get("/api/hotspots")
@@ -492,11 +534,19 @@ def login(body: Login, request: Request):
 
 
 def _officer_action(incident_id: str, action: str, officer: dict, reason: str | None = None,
-                    severity: str | None = None) -> dict:
+                    severity: str | None = None, urgent: bool = False) -> dict:
     inc = _get(incident_id)
     who = officer["sub"]
     ts = now()
     with store.lock:
+        if action in ("verify", "respond") and inc.status == "Reported" and field.needs_field(inc):
+            if not urgent:   # both people validate: police on the ground, then the control room
+                raise HTTPException(409, "Police have not checked this yet. Send a unit first, or confirm it as urgent.")
+            inc.urgent = True
+            S.db.audit(ts, who, "urgent_publish", inc.id, {"reason": reason})
+        if action in ("verify", "respond") and not severity and inc.field_severity and not inc.severity_set \
+                and inc.type != "flood":
+            severity = inc.field_severity     # one tap: use what police saw
         if severity and action in ("verify", "respond") and inc.type != "flood":
             inc.severity, inc.severity_set = severity, True   # a flood's severity comes from measured depth
         if action == "verify":
@@ -523,6 +573,109 @@ def _officer_action(incident_id: str, action: str, officer: dict, reason: str | 
     return incident_view(inc)
 
 
+# ---------------------------------------------------------------- field validation: control room assigns, police report
+
+@app.post("/api/incidents/{incident_id}/assign", status_code=201)
+def assign_unit(incident_id: str, body: AssignIn, officer=Depends(require_officer)):
+    """Send a traffic-police unit to check this incident on the ground."""
+    inc = _get(incident_id)
+    if inc.status == "Cleared":
+        raise HTTPException(409, "Incident already cleared")
+    if body.unit not in police_units():
+        raise HTTPException(404, "Unknown police unit")
+    ts = now()
+    with store.lock:
+        field.assign(inc, body.unit, officer["sub"], ts)
+        store.log(ts, f"{inc.title}: {body.unit} sent to check by {officer['sub']}")
+    S.db.audit(ts, officer["sub"], "assign", inc.id, {"unit": body.unit})
+    _changed(inc)
+    return {"incident_id": inc.id, "assignments": inc.assignments}
+
+
+@app.get("/api/units")
+def list_units(officer=Depends(require_officer)):
+    """Police units for the control-room map: where each is (if shared), how fresh, and which incidents it is sent to."""
+    ts, busy = now(), field.busy_counts(store)
+    sent: dict[str, list[str]] = {}
+    for i in store.snapshot():
+        for a in i.assignments:
+            if a["status"] in field.OPEN_CALL and i.status != "Cleared":
+                sent.setdefault(a["unit"], []).append(i.id)
+    units = []
+    for n in police_units():
+        p = store.units.get(n)
+        units.append({"unit": n, "lat": p["lat"] if p else None, "lon": p["lon"] if p else None,
+                      "age_s": round(ts - p["ts"]) if p else None, "calls": busy.get(n, 0), "incidents": sent.get(n, [])})
+    return {"units": units}
+
+
+@app.get("/api/incidents/{incident_id}/units")
+def units_for_incident(incident_id: str, officer=Depends(require_officer)):
+    return {"units": field.units_by_distance(store, _get(incident_id), police_units())}
+
+
+def _call_view(inc: Incident, unit: str) -> dict:
+    mine = next((a for a in inc.assignments if a["unit"] == unit), None)
+    return {"id": inc.id, "type": inc.type, "title": inc.title, "road": S.rg.road_name(inc.lat, inc.lon),
+            "lat": inc.lat, "lon": inc.lon, "status": inc.status, "severity": inc.severity,
+            "published": services.is_published(inc, now()), "my_status": mine["status"] if mine else None,
+            "assigned_at": mine["at"] if mine else None, "my_reports": [r for r in inc.field_reports if r["unit"] == unit],
+            "signals": sorted({s.source for s in inc.signals})}
+
+
+@app.get("/api/police/me")
+def police_me(police=Depends(require_police)):
+    return {"unit": police["sub"], "position": store.units.get(police["sub"]), "centre": list(S.rg.centre())}
+
+
+@app.post("/api/police/position")
+def police_position(p: UnitPositionIn, police=Depends(require_police)):
+    store.units[police["sub"]] = {"lat": p.lat, "lon": p.lon, "ts": now()}
+    return {"ok": True}
+
+
+@app.get("/api/police/calls")
+def police_calls(police=Depends(require_police)):
+    unit = police["sub"]
+    calls = [i for i in store.snapshot() if i.status != "Cleared"
+             and any(a["unit"] == unit and a["status"] in field.OPEN_CALL for a in i.assignments)]
+    calls.sort(key=lambda i: next(a["at"] for a in i.assignments if a["unit"] == unit), reverse=True)
+    return {"calls": [_call_view(i, unit) for i in calls]}
+
+
+def _my_call(incident_id: str, unit: str, statuses=field.OPEN_CALL) -> Incident:
+    inc = _get(incident_id)
+    if not any(a["unit"] == unit and a["status"] in statuses for a in inc.assignments):
+        raise HTTPException(403, "You were not sent to this call")
+    return inc
+
+
+@app.post("/api/police/calls/{incident_id}/status")
+def police_call_status(incident_id: str, body: CallStatusIn, police=Depends(require_police)):
+    inc = _my_call(incident_id, police["sub"])
+    ts = now()
+    with store.lock:
+        field.set_status(inc, police["sub"], body.status, ts)
+        store.log(ts, f"{inc.title}: {police['sub']} {body.status.replace('_', ' ')}")
+    S.db.audit(ts, police["sub"], f"call_{body.status}", inc.id)
+    _changed(inc)
+    return _call_view(inc, police["sub"])
+
+
+@app.post("/api/police/calls/{incident_id}/report")
+def police_report(incident_id: str, body: FieldReportIn, police=Depends(require_police)):
+    """What the officer SEES on the scene. A strong signal; the control room still confirms before drivers are warned."""
+    inc = _my_call(incident_id, police["sub"])
+    ts = now()
+    with store.lock:
+        field.add_report(inc, police["sub"], body.finding, body.need, body.note, ts)
+        fusion.refresh(store, inc)
+        store.log(ts, f"{inc.title}: {police['sub']} reports {body.finding.replace('_', ' ')}")
+    S.db.audit(ts, police["sub"], "field_report", inc.id, {"finding": body.finding, "need": body.need})
+    _changed(inc)
+    return _call_view(inc, police["sub"])
+
+
 # ---------------------------------------------------------------- dispatch (officer)
 
 @app.post("/api/incidents/{incident_id}/dispatch", status_code=201)
@@ -535,6 +688,9 @@ def dispatch(incident_id: str, body: Dispatch, officer=Depends(require_officer))
     ts = now()
     with store.lock:
         inc.dispatched.append({"unit": body.unit, "by": officer["sub"], "at": ts, "note": body.note})
+        for r in inc.requests:
+            if r["kind"] == body.unit:
+                r["done"] = True
         store.log(ts, f"{inc.title}: {body.unit} dispatched by {officer['sub']}")
         inc.updated = ts
     S.db.audit(ts, officer["sub"], "dispatch", inc.id, {"unit": body.unit, "note": body.note})
@@ -545,13 +701,15 @@ def dispatch(incident_id: str, body: Dispatch, officer=Depends(require_officer))
 class ActionBody(BaseModel):
     reason: str | None = None
     severity: Severity | None = None   # verify / respond: the officer decides, e.g. "Closed" for a fully blocked road
+    urgent: bool = False               # publish without waiting for police (recorded in the audit log)
 
 
 @app.post("/api/incidents/{incident_id}/{action}")
 def incident_action(incident_id: str, action: str, body: ActionBody | None = None, officer=Depends(require_officer)):
     if action not in ("verify", "respond", "clear", "reject"):
         raise HTTPException(404, "Unknown action")
-    return _officer_action(incident_id, action, officer, body.reason if body else None, body.severity if body else None)
+    return _officer_action(incident_id, action, officer, body.reason if body else None, body.severity if body else None,
+                           body.urgent if body else False)
 
 
 @app.post("/api/planned-works", status_code=201)
@@ -750,6 +908,22 @@ def favicon():
 @app.get("/")
 def index():
     return FileResponse(os.path.join(STATIC_DIR, "index.html"))
+
+
+@app.get("/control", include_in_schema=False)
+def control_page():
+    return FileResponse(os.path.join(STATIC_DIR, "control.html"))
+
+
+@app.get("/police", include_in_schema=False)
+def police_page():
+    return FileResponse(os.path.join(STATIC_DIR, "police.html"))
+
+
+@app.get("/classic", include_in_schema=False)
+def classic_page():
+    """The original detailed dashboard (planned works, what-if, signal advice, bulletins, evaluation)."""
+    return FileResponse(os.path.join(STATIC_DIR, "classic.html"))
 
 
 @app.get("/commute", include_in_schema=False)

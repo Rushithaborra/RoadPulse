@@ -15,6 +15,22 @@ does about it and where the test is (`tests/test_alerts.py`, `tests/test_bot.py`
 | **Voice alerts only exist inside navigation** | Right: so the alert is not limited to navigation. Order of reach: **pre-trip** alert (read at home, safest), **commute mode** page (spoken, but only while open), **Telegram live location** (keeps updating in the background), and **boards** (need nothing from the driver). |
 | **What happens when an accident occurs?** | Detect → verify (human) → set severity → **dispatch** police / ambulance / tow (recorded, with audit) → affected people warned with a diversion → road reopens → **everyone who was warned hears the all-clear**. |
 
+## Validation: police on the ground, then the control room
+
+A citizen report is untrusted and never publishes on its own. The flow:
+
+1. **Report** arrives (untrusted, one source however many people send it).
+2. **Control room sends the nearest police unit** (`POST /api/incidents/{id}/assign`; units ranked by distance).
+3. **Police** accept, travel, arrive (`/api/police/calls/{id}/status`) and report what they see (`/report`): blocked,
+   one lane, not real, or open, plus a request for an ambulance or tow. This is strong evidence but **does not publish**.
+4. **Control room confirms** with one tap; the police finding becomes the default severity. Drivers are warned now.
+5. **Police say the road is open** and the control room clears it (or traffic recovery does).
+
+Fast track: the control room can confirm as `urgent` with no police check; this is recorded in the audit log.
+Trusted sources (water sensor, camera, planned works) skip the police step. Police tokens cannot use control-room
+endpoints and the control room cannot use police ones. Turn the step off with `REQUIRE_FIELD_CONFIRMATION=0`.
+Tests: `tests/test_field.py`.
+
 ## The flow
 
 ```

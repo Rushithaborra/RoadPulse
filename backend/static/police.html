@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>RoadPulse — traffic police</title>
+  <meta name="theme-color" content="#2563eb">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%232563eb'/%3E%3Crect x='14' y='30' width='36' height='5' rx='2.5' fill='white'/%3E%3C/svg%3E">
+  <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%232563eb'/%3E%3Crect x='14' y='30' width='36' height='5' rx='2.5' fill='white'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/static/vendor/leaflet/leaflet.css">
+  <link rel="stylesheet" href="/static/rp.css">
+  <style>
+    .topbar { position: fixed; z-index: 550; top: 12px; left: 12px; right: 12px; display: flex; gap: 10px; align-items: center; pointer-events: none; }
+    .topbar > * { pointer-events: auto; } .unitbar { flex: 1; display: flex; gap: 10px; align-items: center; padding: 10px 14px; border-radius: 999px; background: var(--card); box-shadow: var(--shadow); min-width: 0; }
+    .dotlive { width: 10px; height: 10px; border-radius: 50%; background: #22c55e; box-shadow: 0 0 0 4px #22c55e33; flex: none; }
+    @media (min-width: 900px) { .topbar { right: auto; width: 400px; left: 16px; } }
+    .legend { display: none; }
+    textarea { min-height: 70px; resize: vertical; }
+  </style>
+</head>
+<body>
+  <div id="map" aria-label="Map of the call"></div>
+  <div class="topbar">
+    <div class="unitbar"><span class="dotlive" id="dot"></span><b id="unit">Traffic police</b><span class="muted small grow" id="where"></span><span id="queued" class="chip warnc hidden"></span></div>
+    <button id="btn-style" class="round" aria-label="Switch between map and satellite"></button>
+  </div>
+  <section id="sheet" class="sheet" aria-label="Your calls">
+    <div id="grab" class="grab" role="button" tabindex="0" aria-label="Make the card bigger or smaller"></div>
+    <div id="body" class="sheet-body"></div>
+  </section>
+  <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
+  <script src="/static/vendor/leaflet/leaflet.js"></script>
+  <script src="/static/rp.js"></script>
+  <script src="/static/police.js"></script>
+</body>
+</html>

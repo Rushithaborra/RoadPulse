@@ -5,6 +5,8 @@ import sys
 os.environ.setdefault("CLEAR_WINDOW_S", "0")
 os.environ.setdefault("OFFICER_USERS", "officer:test-pass")
 os.environ.setdefault("DEVICE_KEYS", "test-key")
+os.environ.setdefault("POLICE_USERS", "unit12:police-pass,unit7:police-pass-2")
+os.environ.setdefault("REQUIRE_FIELD_CONFIRMATION", "0")  # tests/test_field.py turns the two-step validation on
 os.environ.setdefault("REPORT_RATE_PER_MIN", "600")
 os.environ.setdefault("ROADPULSE_SECRET", "test-secret")
 os.environ.setdefault("GRAPHML_PATH", "/nonexistent.graphml")  # always use the synthetic grid in tests
