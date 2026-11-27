@@ -460,3 +460,16 @@ class TestBoards:
 
     def test_unknown_board_is_404(self, client):
         assert client.get("/api/boards/nope").status_code == 404
+
+
+# ================================================================ what the simple screen needs from the route check
+class TestRouteExplanation:
+    def test_route_check_says_how_serious_the_blocked_road_is_and_how_long_the_usual_way_takes(self, client, officer_headers):
+        publish_accident(client, officer_headers, "n0_0", "n0_1")
+        a, b = ll("n0_-4"), ll("n0_4")
+        r = client.post("/api/routes", json={"from_lat": a[0], "from_lon": a[1], "to_lat": b[0], "to_lon": b[1],
+                                             "vehicle": "car"}).json()
+        hit = r["usual_route_hits"][0]
+        assert hit["severity"] == "Closed" and hit["type"] == "accident" and hit["road"]
+        assert r["usual_time_s"] > 0
+        assert r["routes"][0]["time_s"] >= r["usual_time_s"]          # going round never beats the blocked way

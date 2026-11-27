@@ -40,7 +40,21 @@ With Docker: `cp .env.example .env && docker compose up --build`
 If the page ever looks out of date after an update, hard-reload it (Ctrl+Shift+R); the server asks browsers to
 revalidate, so this is only needed once.
 
-## What the interface shows
+## Three apps for three people
+
+| App | Who | What it does |
+|---|---|---|
+| `/` | Commuters | Map-first: see problems, check a trip, get a way round, report. Plain words: what is wrong, how serious, what to do. |
+| `/control` | Control room | A queue of reports. Send the nearest police unit, see what police found, confirm with one tap, send ambulance or tow, clear. |
+| `/police` | Traffic police in the field | Get a call, accept, travel, arrive, report what you SEE (blocked, one lane, not real), ask for an ambulance or tow, say the road is open. Phone first. |
+
+A citizen report is checked twice before drivers are warned: **police on the ground, then the control room**. The control
+room can fast-track a real emergency as *urgent* (recorded). Sensors, cameras and planned works are already trusted and
+skip the police step. Set `REQUIRE_FIELD_CONFIRMATION=0` to turn the police step off. Every app has a **Map / Satellite**
+switch (satellite imagery © Esri, Maxar, Earthstar Geographics; needs internet and follows Esri's terms of use).
+Staff logins: `OFFICER_USERS` (control room) and `POLICE_USERS` (police), in `.env`. The original detailed dashboard is at `/classic`.
+
+## What the interface shows (detailed view)
 
 - **Map:** real OpenStreetMap roads of the pilot area (Dwaraka Nagar and the RTC Complex / Dwaraka Bus Station, both
   inside the loaded map; "Jump to" buttons and labels mark them). A collapsible **Map legend** explains every colour

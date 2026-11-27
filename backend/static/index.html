@@ -2,160 +2,48 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>RoadPulse — live road conditions</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>RoadPulse — know before you go</title>
+  <meta name="theme-color" content="#2563eb">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%232563eb'/%3E%3Crect x='14' y='30' width='36' height='5' rx='2.5' fill='white'/%3E%3C/svg%3E">
+  <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%232563eb'/%3E%3Crect x='14' y='30' width='36' height='5' rx='2.5' fill='white'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="/static/vendor/leaflet/leaflet.css">
-  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/rp.css">
+  <style>
+    .topbar { position: fixed; z-index: 550; top: 12px; left: 12px; right: 12px; display: flex; gap: 10px; align-items: flex-start; pointer-events: none; }
+    .topbar > * { pointer-events: auto; } .topbar .pill { flex: 1; min-width: 0; }
+    .pill .t { display: block; font-size: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } .pill .sub { display: block; font-size: 13px; line-height: 1.3; }
+    .side { display: flex; flex-direction: column; gap: 10px; }
+    .fab { position: fixed; z-index: 520; left: 12px; bottom: calc(var(--sheet-h) + 14px); height: 48px; padding: 0 18px; border-radius: 999px; background: var(--brand); color: #fff; font-weight: 700; box-shadow: var(--shadow); }
+    @media (min-width: 900px) { .topbar { right: auto; width: 400px; left: 16px; } .side { position: fixed; right: 12px; top: 12px; bottom: auto; } .fab { bottom: 28px; left: auto; right: 12px; } }
+  </style>
 </head>
 <body>
-  <header class="topbar">
-    <div class="brand">
-      <span class="logo" aria-hidden="true"></span>
-      <div><b>RoadPulse</b><small>Road disruptions and safe routes · Visakhapatnam pilot, Dwaraka Nagar</small></div>
-    </div>
-    <nav class="tabs" role="tablist" aria-label="View">
-      <button class="tab active" role="tab" aria-selected="true" data-view="commuter">Commuter</button>
-      <button class="tab" role="tab" aria-selected="false" data-view="authority">Traffic authority</button>
-    </nav>
-    <div class="status">
-      <span id="mapmode" class="chip hidden"></span>
-      <span id="conn" class="chip">connecting…</span>
-    </div>
-  </header>
-  <div id="banner" class="banner hidden" role="alert"></div>
+  <div id="map" aria-label="Road map"></div>
+  <div class="topbar">
+    <button id="pill" class="pill"><span style="color:var(--brand)" id="pill-ic"></span>
+      <span class="grow"><b class="t" id="pill-t">Where to?</b><span class="sub" id="pill-s">Tap your start and your destination on the map</span></span>
+      <span id="pill-x" class="link hidden">Clear</span></button>
+  </div>
+  <div class="side">
+    <button id="btn-locate" class="round" aria-label="Use my location" title="Use my location"></button>
+    <button id="btn-style" class="round" aria-label="Switch between map and satellite" title="Map or satellite"></button>
+  </div>
+  <div id="offline" class="chip warnc offline hidden">Offline: showing the last information</div>
+  <button id="btn-report" class="fab"></button>
+  <div class="legend" aria-label="What the colours mean"><span><i style="background:#d9a400"></i>Minor</span><span><i style="background:#ef7d00"></i>Slow</span><span><i style="background:#d92d20"></i>Very slow</span><span><i style="background:#7a1fa2"></i>Blocked</span></div>
 
-  <main>
-    <div class="mapwrap">
-      <div id="map" aria-label="Road map"></div>
-      <div id="map-overlay" class="map-overlay">Loading road network…</div>
-    </div>
-
-    <aside id="panel">
-      <!-- COMMUTER -->
-      <section id="view-commuter" class="view">
-        <div class="block">
-          <h2>Plan a route</h2>
-          <div class="od">
-            <div class="od-row"><span class="pin a">A</span><span id="od-start" class="od-text muted">Click the map to set your start</span></div>
-            <div class="od-row"><span class="pin b">B</span><span id="od-end" class="od-text muted">Then click your destination</span></div>
-          </div>
-          <label for="vehicle">Vehicle
-            <select id="vehicle">
-              <option value="two_wheeler">Two-wheeler</option>
-              <option value="auto">Auto-rickshaw</option>
-              <option value="car" selected>Car</option>
-              <option value="bus">Bus</option>
-              <option value="ambulance">Ambulance</option>
-            </select>
-          </label>
-          <div class="row">
-            <button id="btn-reroute" disabled>Recalculate</button>
-            <button id="btn-clear-route" class="ghost">Reset</button>
-          </div>
-          <div id="route-result" aria-live="polite"></div>
-          <div class="row goto" id="goto"></div>
-        </div>
-
-        <div class="block">
-          <h2>Live alerts <span class="count" id="alert-count"></span></h2>
-          <ul id="public-incidents" class="list"></ul>
-          <p class="hint">Only verified disruptions are shown and used for routing. The per-vehicle water-depth limits are assumed demo values, not safety guidance.</p>
-        </div>
-
-        <div class="block">
-          <h2>Flood watch</h2>
-          <ul id="public-hotspots" class="list"></ul>
-        </div>
-
-        <div class="block">
-          <h2>Report a problem</h2>
-          <label for="report-type">What did you see?
-            <select id="report-type">
-              <option value="flood">Waterlogging</option>
-              <option value="accident">Accident</option>
-              <option value="blockage">Road blocked</option>
-              <option value="construction">Construction</option>
-            </select>
-          </label>
-          <label for="report-note">Describe it (optional)
-            <input id="report-note" maxlength="200" placeholder="e.g. water above the footpath near the school">
-          </label>
-          <div class="od-row">
-            <span class="pin r">R</span><span id="report-loc" class="od-text muted">No location chosen</span>
-            <button id="btn-pick-report" class="small ghost">Choose on map</button>
-          </div>
-          <button id="btn-report" disabled>Send report</button>
-          <p id="report-msg" class="msg" aria-live="polite"></p>
-          <p class="hint">A traffic officer checks every report before other commuters see it.</p>
-          <ul id="my-reports" class="list"></ul>
-        </div>
-      </section>
-
-      <!-- AUTHORITY -->
-      <section id="view-authority" class="view hidden">
-        <div id="login-box" class="block">
-          <h2>Officer login</h2>
-          <label for="user">Username <input id="user" value="officer" autocomplete="username"></label>
-          <label for="pass">Password <input id="pass" type="password" autocomplete="current-password"></label>
-          <button id="btn-login">Log in</button>
-          <p id="login-msg" class="msg" aria-live="polite"></p>
-        </div>
-
-        <div id="dash" class="hidden">
-          <div class="block">
-            <div class="row spread"><h2>Incidents</h2><button id="btn-logout" class="ghost small">Log out</button></div>
-            <div id="kpis" class="kpis"></div>
-            <h3>Pending review</h3>
-            <ul id="officer-pending" class="list"></ul>
-            <h3>Active</h3>
-            <ul id="officer-active" class="list"></ul>
-          </div>
-
-          <div class="block">
-            <h2>Flood countdown</h2>
-            <div class="row">
-              <label class="grow" for="rain">Rain override (mm/h) <input id="rain" type="number" min="0" max="200" step="1" placeholder="use forecast"></label>
-              <button id="btn-rain" class="small">Set</button>
-            </div>
-            <p id="rain-source" class="hint"></p>
-            <ul id="officer-hotspots" class="list"></ul>
-          </div>
-
-          <div class="block">
-            <h2>Decision support</h2>
-            <div id="decision" class="card muted">Select an incident, then run a what-if, get signal advice or draft a bulletin.</div>
-          </div>
-
-          <details class="block">
-            <summary>Register planned works</summary>
-            <label for="pw-title">Title <input id="pw-title" value="Pipeline digging"></label>
-            <label for="pw-start">Starts in (min) <input id="pw-start" type="number" value="0"></label>
-            <label for="pw-hours">Duration (h) <input id="pw-hours" type="number" value="4"></label>
-            <label class="check"><input id="pw-full" type="checkbox" checked> Full closure</label>
-            <div class="od-row"><span class="pin r">W</span><span id="pw-loc" class="od-text muted">No location chosen</span>
-              <button id="btn-pick-works" class="small ghost">Choose on map</button></div>
-            <button id="btn-pw" disabled>Register</button>
-            <p id="pw-msg" class="msg" aria-live="polite"></p>
-          </details>
-
-          <details class="block">
-            <summary>Before / after evaluation</summary>
-            <p class="hint">Simplified traffic model on this map, not SUMO. Uses current verified incidents.</p>
-            <button id="btn-eval">Run evaluation</button>
-            <div id="eval-result"></div>
-          </details>
-
-          <div class="block">
-            <h2>Activity</h2>
-            <ul id="events" class="list small"></ul>
-          </div>
-        </div>
-      </section>
-    </aside>
-  </main>
+  <section id="sheet" class="sheet" aria-label="Road problems">
+    <div id="grab" class="grab" role="button" tabindex="0" aria-label="Make the card bigger or smaller"></div>
+    <div id="body" class="sheet-body"></div>
+  </section>
   <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
 
   <script src="/static/vendor/leaflet/leaflet.js"></script>
-  <script src="/static/app.js"></script>
+  <script src="/static/rp.js"></script>
+  <script src="/static/commuter.js"></script>
 </body>
 </html>

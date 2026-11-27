@@ -54,6 +54,7 @@ class Store:
         self.link_state: dict[tuple, str] = {}
         self.baseline: dict[tuple, tuple[float, int]] = {}   # (link, hour-of-week) -> (normal speed km/h, updates)
         # alert delivery (see alerts.py)
+        self.units: dict[str, dict] = {}                      # police unit -> {lat, lon, ts}
         self.subscribers: dict = {}
         self.alert_log: deque = deque(maxlen=300)             # redacted: no names, no coordinates
 

@@ -32,6 +32,7 @@ SOURCE_WEIGHTS = {
     "probe": 0.4,
     "cctv": 0.5,
     "report": 0.35,
+    "field": 0.9,   # traffic police on the scene: strong evidence, but NOT a trusted auto-publisher (control room confirms)
     "planned": 1.0,
     "officer": 1.0,
 }
@@ -129,3 +130,9 @@ def load_hotspots() -> tuple[list[dict], str]:
 
 
 OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast"
+
+
+def field_required() -> bool:
+    """Citizen-only incidents need a field (traffic police) confirmation before the control room can publish them,
+    unless the control room marks them urgent. Read on every call so a deployment can change it with an env var."""
+    return os.getenv("REQUIRE_FIELD_CONFIRMATION", "1") != "0"

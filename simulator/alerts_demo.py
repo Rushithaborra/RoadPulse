@@ -5,7 +5,7 @@ Run the server first, then:
 
 Everything it sends is marked simulated. It uses only the public API, like a real phone, sensor and officer would.
 Steps: two commuters sign up -> slow traffic raises a SUSPICION only -> a citizen report is still not enough ->
-the officer verifies and closes the road -> the pre-trip alert goes out, the driver on the road is warned before the
+police check it on the scene, then the control room confirms and closes the road -> the pre-trip alert goes out, the driver on the road is warned before the
 turn-off, a board shows what to avoid -> the officer sends police and an ambulance -> the road reopens and everyone
 who was warned hears it.
 """
@@ -138,11 +138,27 @@ class Story:
         print(f"    report → status {r['status']}, confidence {r['confidence']}, public incidents: "
               f"{len(c.get('/api/incidents').json()['incidents'])}")
 
-        self.step("4. The control room verifies it and decides the road is CLOSED (a human decision), then sends help.")
-        c.post(f"/api/incidents/{iid}/verify", json={"severity": "Closed"}, headers=self.off).raise_for_status()
-        for unit in ("police", "ambulance", "tow"):
+        self.step("4. Two people validate it. The control room sends the nearest police unit; the officer reports what "
+                  "they SEE on the scene; then the control room confirms and decides the road is CLOSED.")
+        if self.a.police_user:
+            r = c.post("/api/auth/login", json={"username": self.a.police_user, "password": self.a.police_password})
+            r.raise_for_status()
+            pol = {"Authorization": f"Bearer {r.json()['token']}"}
+            c.post(f"/api/incidents/{iid}/assign", json={"unit": self.a.police_user}, headers=self.off).raise_for_status()
+            for st in ("accepted", "on_way", "arrived"):
+                c.post(f"/api/police/calls/{iid}/status", json={"status": st}, headers=pol).raise_for_status()
+            c.post(f"/api/police/calls/{iid}/report", json={"finding": "blocked", "need": ["ambulance"], "note": "two cars, road blocked"},
+                   headers=pol).raise_for_status()
+            print(f"    {self.a.police_user}: accepted, on the way, arrived, reports BLOCKED and asks for an ambulance")
+            print("    drivers warned so far:", len(c.get("/api/incidents").json()["incidents"]), "(police alone never warn drivers)")
+            c.post(f"/api/incidents/{iid}/verify", json={}, headers=self.off).raise_for_status()   # one tap: uses the police finding
+        else:
+            print("    (no --police-user given: the control room fast-tracks it as URGENT, which is recorded)")
+            c.post(f"/api/incidents/{iid}/verify", json={"severity": "Closed", "urgent": True, "reason": "demo"},
+                   headers=self.off).raise_for_status()
+        for unit in ("ambulance", "tow"):
             c.post(f"/api/incidents/{iid}/dispatch", json={"unit": unit}, headers=self.off).raise_for_status()
-        print("    verified, severity Closed; police, ambulance and tow recorded as dispatched")
+        print("    confirmed by the control room; ambulance and tow recorded as sent")
         self.show("Ravi, still at home", rav, hr, seen_r)
 
         self.step("5. Lakshmi drives her usual route; positions arrive every 40 m. She is warned before the turn-off.")
@@ -188,6 +204,8 @@ def main():
     p.add_argument("--device-key", required=True)
     p.add_argument("--user", default="officer")
     p.add_argument("--password", required=True)
+    p.add_argument("--police-user", help="a traffic-police unit (POLICE_USERS) to play the officer on the scene")
+    p.add_argument("--police-password")
     p.add_argument("--auto", action="store_true", help="do not pause between steps")
     Story(p.parse_args()).run()
 

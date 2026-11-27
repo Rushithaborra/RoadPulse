@@ -64,7 +64,10 @@ Fleet probes ───────────┘      │          │
 | POST | /api/subscribers/{id}/places, /trip, /position | subscriber token | saved places, start a trip, live location |
 | GET | /api/subscribers/{id}/alerts | subscriber token | alert inbox |
 | GET | /api/boards, /api/boards/{id} | – | simulated roadside boards |
-| POST | /api/incidents/{id}/dispatch | officer | record police / ambulance / tow sent |
+| POST | /api/incidents/{id}/dispatch | officer | record ambulance / tow / drainage sent |
+| POST | /api/incidents/{id}/assign | officer | send a police unit to check; GET `/api/incidents/{id}/units` ranks units by distance |
+| GET | /api/police/calls, /me | police | calls for this unit |
+| POST | /api/police/calls/{id}/status, /report; /api/police/position | police | accept / travel / arrive; report what is seen; share location |
 
 Incident JSON: see `docs/incident_schema.json`.
 Errors: `422 {"detail": "<field>: <message>; ...", "errors": [{"field", "message"}]}` for invalid input, including
