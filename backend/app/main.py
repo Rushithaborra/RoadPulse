@@ -82,6 +82,8 @@ async def lifecycle_loop():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     S.rg = RoadGraph.load()
+    if S.rg.warning:
+        log.warning("ROAD GRAPH FALLBACK: %s", S.rg.warning)
     if S.rg.mode == "osm":
         config.CENTER_LAT, config.CENTER_LON = S.rg.centre()
         store.reset()  # re-place hotspots relative to the real map centre if no hotspots file
@@ -137,6 +139,9 @@ async def request_log(request: Request, call_next):
         log.info("rid=%s %s %s %d %.0fms", rid, request.method, request.url.path, resp.status_code,
                  (time.perf_counter() - t0) * 1000)
     resp.headers["X-Request-ID"] = rid
+    p = request.url.path
+    if p == "/" or p.startswith("/static/"):
+        resp.headers["Cache-Control"] = "no-cache"  # revalidate (ETag) so a redeployed UI is never served stale
     return resp
 
 
@@ -214,7 +219,7 @@ def _changed(*incs: Incident):
 @app.get("/api/health")
 def health():
     return {"ok": True, "graph": S.rg.source, "map_mode": S.rg.mode, "hotspots_source": store.hotspot_source,
-            "routing": "road-segment",
+            "routing": "road-segment", "map_warning": S.rg.warning,
             "nodes": S.rg.g.number_of_nodes(), "edges": S.rg.g.number_of_edges(),
             "incidents_open": sum(1 for i in store.snapshot() if i.status != "Cleared"),
             "center": [config.CENTER_LAT, config.CENTER_LON]}
@@ -226,7 +231,8 @@ def network():
     for u, v, d in S.rg.g.edges(data=True):
         if str(u) < str(v) or not S.rg.g.has_edge(v, u):
             segs.append({"coords": S.rg.edge_geo(u, v), "speed_kph": d["speed_kph"], "lanes": d["lanes"]})
-    return {"source": S.rg.source, "map_mode": S.rg.mode, "hotspots_source": store.hotspot_source,
+    return {"source": S.rg.source, "map_mode": S.rg.mode, "map_warning": S.rg.warning,
+            "hotspots_source": store.hotspot_source,
             "center": [config.CENTER_LAT, config.CENTER_LON], "segments": segs}
 
 
@@ -264,6 +270,21 @@ def post_report(r: CitizenReport, request: Request):
     return {"incident_id": inc.id, "status": inc.status, "confidence": inc.confidence,
             "message": "Thanks, your report was received" if inc.status == "Reported"
             else "Thanks, this matches a verified incident"}
+
+
+@app.get("/api/reports/{incident_id}/status")
+def report_status(incident_id: str):
+    """What happened to a report: the reporter keeps the incident id from POST /api/reports. Only a coarse outcome
+    is returned (no evidence, no location), so unpublished incidents are not exposed."""
+    inc = store.incidents.get(incident_id)
+    if not inc:
+        raise HTTPException(404, "Report not found (it may be too old)")
+    published = services.is_published(inc, now())
+    if inc.status == "Cleared":
+        outcome = "rejected" if (inc.cleared_reason or "").startswith("rejected") else "resolved"
+    else:
+        outcome = "published" if published else "pending"
+    return {"incident_id": inc.id, "outcome": outcome, "status": inc.status, "published": published}
 
 
 @app.post("/api/sensors/readings")
@@ -415,8 +436,10 @@ async def stream(request: Request, ticket: str | None = None):
                 last = S.version
                 yield f"data: {await snapshot_json(bool(officer))}\n\n"
             beat += 1
-            if beat % 15 == 0:
-                yield ": keep-alive\n\n"
+            if beat % 10 == 0:
+                # a real (named) event, not a comment: the page can only tell "connected and quiet" from "silently
+                # dead" if something arrives. It does not touch onmessage, so snapshots are unaffected.
+                yield f"event: heartbeat\ndata: {json.dumps({'t': now()})}\n\n"
             await asyncio.sleep(1)
 
     return StreamingResponse(gen(), media_type="text/event-stream",

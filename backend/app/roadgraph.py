@@ -50,12 +50,23 @@ class RoadGraph:
         self._build_index()
 
     # ---------- construction ----------
+    warning: str | None = None  # set when the real road graph is NOT in use; shown to users, never silent
+
     @classmethod
     def load(cls) -> "RoadGraph":
+        """The real OSM graph if data/area.graphml loads; otherwise the synthetic grid WITH a warning that the API
+        and the UI both show. A broken file does not stop the server, but it can never pass as real data."""
         path = os.path.abspath(config.GRAPHML_PATH)
         if os.path.exists(path):
-            return cls(_from_graphml(path), f"osm:{os.path.basename(path)}")
-        return cls(_synthetic_grid(config.CENTER_LAT, config.CENTER_LON), "synthetic-grid")
+            try:
+                return cls(_from_graphml(path), f"osm:{os.path.basename(path)}")
+            except Exception as e:  # corrupt or unsupported file
+                reason = f"{os.path.basename(path)} could not be loaded ({type(e).__name__}: {str(e)[:120]})"
+        else:
+            reason = f"No real road graph found ({os.path.basename(path)} is missing; run tools/fetch_map.py)"
+        rg = cls(_synthetic_grid(config.CENTER_LAT, config.CENTER_LON), "synthetic-grid")
+        rg.warning = f"{reason}. Showing a SYNTHETIC demo grid: these are not real roads and routes are not real."
+        return rg
 
     def _build_index(self):
         """Grid buckets of edges and nodes so nearest-road lookups do not scan the whole graph."""

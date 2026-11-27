@@ -12,22 +12,64 @@ Open Database Licence (ODbL). The attribution is shown on the map and must stay 
 
 ## Run it (2 minutes)
 
-```bash
-python -m venv .venv && source .venv/bin/activate      # Windows: .venv\Scripts\activate
+There is one server: it serves the API and the web interface (plain HTML/JS, no build step), so there is no separate
+frontend command. Python 3.12 or newer.
+
+**Windows (PowerShell)**
+```powershell
+python -m venv .venv
+.venv\Scripts\Activate.ps1
 pip install -r requirements-dev.txt
-cp .env.example .env                                   # then edit the passwords and keys
-uvicorn app.main:app --app-dir backend --reload --env-file .env --no-access-log --timeout-graceful-shutdown 3
+Copy-Item .env.example .env          # then edit the passwords and keys in .env
+uvicorn app.main:app --app-dir backend --env-file .env --no-access-log --timeout-graceful-shutdown 3
 ```
-Open http://localhost:8000. Officer login uses `OFFICER_USERS` from `.env`. There are no built-in passwords:
-if `OFFICER_USERS` or `DEVICE_KEYS` is missing, the server generates random ones for that run and prints them in its log.
+
+**macOS / Linux**
+```bash
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements-dev.txt
+cp .env.example .env                 # then edit the passwords and keys
+uvicorn app.main:app --app-dir backend --env-file .env --no-access-log --timeout-graceful-shutdown 3
+```
+Open http://localhost:8000. Officer login uses `OFFICER_USERS` from `.env` (the example file has `change-me`
+placeholders: change them before sharing the server). If `OFFICER_USERS` or `DEVICE_KEYS` is missing, the server
+generates random ones for that run and prints them in its log.
 
 With Docker: `cp .env.example .env && docker compose up --build`
 
+If the page ever looks out of date after an update, hard-reload it (Ctrl+Shift+R); the server asks browsers to
+revalidate, so this is only needed once.
+
+## What the interface shows
+
+- **Map:** real OpenStreetMap roads of the pilot area (Dwaraka Nagar and the RTC Complex / Dwaraka Bus Station, both
+  inside the loaded map; "Jump to" buttons and labels mark them). A collapsible **Map legend** explains every colour
+  and symbol. If `data/area.graphml` is missing or cannot be loaded, the server falls back to a synthetic grid and
+  the page shows a red **MAP WARNING** banner and a "SYNTHETIC grid: not real roads" badge; it is never silent
+  (`/api/health` and `/api/network` carry `map_warning`).
+- **Commuter:** click A then B for a route that follows real roads; verified incidents colour the affected roads by
+  severity, roads blocked for your chosen vehicle get a black dotted overlay, and the route changes live when an
+  incident is verified, changes or is resolved. Only verified incidents are shown or used.
+- **Report a problem:** choose the type, describe it, pick the location on the map, send. A public report is never
+  published on its own: it appears under "your reports" as *waiting for officer review* and turns into *verified*,
+  *not confirmed* or *resolved* as an officer acts (the page asks `GET /api/reports/{id}/status`, which exposes only
+  that outcome).
+- **Traffic authority:** log in, see reports *pending review* and *active* incidents, open **Evidence** (type, road,
+  location, severity, confidence, status timeline and every signal with its source and a SIMULATED badge), then
+  **Verify**, **Reject**, **Approve diversion** or **Resolve**; what-if, signal advice and a bulletin draft are
+  advice only, RoadPulse controls no signal.
+- **Connection:** the header shows `live · updated Ns ago`. The server sends a heartbeat every ~10 s; if the stream
+  drops or goes quiet, a banner says the information may be out of date and the page reconnects by itself.
+- Per-vehicle water-depth limits are **assumed demo values** in `backend/app/config.py`, not safety guidance.
+
 ## Demo scenario
 
+The full 10-step hackathon walkthrough, with what to say and what to click, is in [`docs/DEMO.md`](docs/DEMO.md).
 In a second terminal (the simulator reads `DEVICE_KEYS` and `OFFICER_USERS` from `.env`):
 ```bash
-python simulator/demo.py all                 # step by step, press Enter between steps
+python simulator/demo.py story               # the 10-step demo, press Enter between steps
+python simulator/demo.py story --auto --auto-officer   # unattended: the script also plays the officer
+python simulator/demo.py all                 # the original scenario with an accident and planned works
 python simulator/demo.py all --auto          # no pauses
 python simulator/demo.py all --no-sensor     # when the real ESP32 is connected
 ```
@@ -121,7 +163,7 @@ Users share a location, pick what they see, and can send `/alerts`.
 
 ## Tests and quality
 ```bash
-python -m pytest -q tests          # 76 tests: domain rules, full report → reroute → dashboard → auto-clear chain,
+python -m pytest -q tests          # 87 tests: domain rules, full report → reroute → dashboard → auto-clear chain,
                                    # OSM graph loading, road-segment routing, demo hotspot placement on the real
                                    # map, and regression tests for every issue found in the engineering reviews
 ```
@@ -180,4 +222,16 @@ Each incident keeps at most 120 evidence signals (latest plus strongest per sour
   up to 3 hours, then the countdown shows "no forecast available". Use the rain override offline.
 - Officer accounts are configured in `.env`; there is no user-management screen.
 - The ESP32 sketch has not been tested on hardware yet.
-- MVP is frozen: no new features without the coordinator's approval.
+- No real traffic feed: congestion comes only from the speed probes the simulator (or a keyed device) posts, and the
+  evaluation is a simplified model. There is no camera/YOLO detection, no trained prediction model and no control of
+  traffic signals; signal output is advice for an officer.
+- The demo hotspots are simulated points on real roads, and the demo water depths and rain are simulated. Real
+  flood spots need surveyed coordinates in `data/hotspots.json`.
+- A citizen flood report within 200 m of a hotspot takes that hotspot's name in its title even when it is a separate
+  incident; the officer's Evidence panel shows the real road and location.
+- The officer session token is signed with `ROADPULSE_SECRET`; if that is not set, a random one is generated per run and
+  officers must log in again after a restart.
+- Browser checks were done in the Chromium-based Browser pane (desktop and 375 px phone width), not on a real phone or
+  in other browsers. Map tiles need internet; the road graph and routing do not.
+- MVP is frozen: no new features without the coordinator's approval. The phase 6 changes (UI, legend, report tracking,
+  heartbeat, map warning, `story` scenario) were explicitly approved.
