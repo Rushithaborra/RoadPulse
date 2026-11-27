@@ -66,7 +66,8 @@ points more than `MAX_SNAP_M` (250 m) from the nearest mapped road segment; `401
 `409` action not allowed in the current state; `429` rate limit. Inputs may carry `"simulated": true` (demo data);
 incidents then report `simulated: true` and the UI labels them.
 
-**MVP frozen 2026-11-27.** No optional features without explicit approval.
+**MVP frozen 2026-11-27** (git tag `mvp-freeze`, after demo hotspot placement was optimised on the real map).
+No optional features without explicit approval; after the freeze only bug fixes, data (surveyed hotspots) and demo prep.
 
 ## 5. Decisions (changes vs design doc flagged)
 - Python 3.12+, FastAPI, NetworkX routing, Leaflet frontend **without a build step** (changed from React: no bundler to break in 20 h; teammates edit one HTML/JS app).
