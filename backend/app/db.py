@@ -47,6 +47,11 @@ class Database:
         self.conn.executescript(SCHEMA)
         self.conn.commit()
 
+    def close(self):
+        """Release the file handle (needed on Windows, where an open database file cannot be deleted)."""
+        with self._lock:
+            self.conn.close()
+
     def _exec(self, sql: str, args: tuple = ()):
         with self._lock:
             self.conn.execute(sql, args)
@@ -58,7 +63,7 @@ class Database:
             "ON CONFLICT(id) DO UPDATE SET type=excluded.type,status=excluded.status,severity=excluded.severity,"
             "confidence=excluded.confidence,lat=excluded.lat,lon=excluded.lon,updated=excluded.updated,doc=excluded.doc",
             (inc.id, inc.type, inc.status, inc.severity, inc.confidence, inc.lat, inc.lon, inc.updated,
-             inc.model_dump_json(exclude={"signals"}) if len(inc.signals) > 200 else inc.model_dump_json()),
+             inc.model_dump_json()),
         )
 
     def load_open_incidents(self) -> list[Incident]:
@@ -92,6 +97,15 @@ class Database:
             rows = self.conn.execute(
                 "SELECT at,actor,action,target,detail FROM audit_log ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
         return [{"at": r[0], "actor": r[1], "action": r[2], "target": r[3], "detail": r[4]} for r in rows]
+
+    def apply_retention(self, now_ts: float, readings_days: int = 7, reports_days: int = 30, cleared_days: int = 30):
+        """Delete raw inputs past their retention period (privacy + bounded disk). Audit log is kept."""
+        with self._lock:
+            self.conn.execute("DELETE FROM sensor_readings WHERE at < ?", (now_ts - readings_days * 86400,))
+            self.conn.execute("DELETE FROM reports WHERE at < ?", (now_ts - reports_days * 86400,))
+            self.conn.execute("DELETE FROM incidents WHERE status = 'Cleared' AND updated < ?",
+                              (now_ts - cleared_days * 86400,))
+            self.conn.commit()
 
     def count(self, table: str) -> int:
         assert table in {"incidents", "status_changes", "sensor_readings", "reports", "audit_log"}

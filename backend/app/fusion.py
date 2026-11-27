@@ -18,10 +18,14 @@ SPECIFICITY = {"slowdown": 0, "construction": 1, "blockage": 2, "accident": 2, "
 
 
 def confidence(signals: list[Signal]) -> float:
-    """C = 1 - prod(1 - w_i), counting each distinct source only once (its strongest signal)."""
+    """C = 1 - prod(1 - w_i), counting each distinct source only once (its strongest signal).
+
+    All public reports collapse into ONE source: reporter ids are client-supplied and prove nothing about
+    independence, so ten reports with ten made-up ids weigh the same as one.
+    """
     best: dict[tuple, float] = {}
     for s in signals:
-        key = (s.source, s.source_id or "")
+        key = ("report", "") if s.source == "report" else (s.source, s.source_id or "")
         best[key] = max(best.get(key, 0.0), s.weight)
     p = 1.0
     for w in best.values():
@@ -38,6 +42,16 @@ def _compatible(inc: Incident, sig: Signal) -> bool:
 
 
 SYMPTOM_RADIUS_M = 120  # a slowdown joins a different-type incident only when this close
+
+
+def has_trusted_evidence(inc: Incident) -> bool:
+    return any(s.source in config.TRUSTED_SOURCES for s in inc.signals)
+
+
+def can_auto_verify(inc: Incident) -> bool:
+    """Auto-verification needs enough confidence AND at least one trusted (authenticated) source.
+    Public reports alone never verify; an officer can always verify manually."""
+    return inc.confidence >= config.PUBLISH_CONFIDENCE and has_trusted_evidence(inc)
 
 
 def find_match(store: Store, sig: Signal) -> Incident | None:
@@ -74,8 +88,28 @@ def set_status(store: Store, inc: Incident, status: str, ts: float | None = None
         hook(inc, status, ts, reason, actor)
 
 
+MAX_SIGNALS = 120
+
+
+def trim_signals(inc: Incident):
+    """Bound evidence kept per incident: the latest signals plus the strongest one of every source,
+    so a sensor posting every 2 s cannot grow memory without limit and confidence is unchanged."""
+    if len(inc.signals) <= MAX_SIGNALS:
+        return
+    best: dict[tuple, Signal] = {}
+    for s in inc.signals:
+        key = ("report", "") if s.source == "report" else (s.source, s.source_id or "")
+        if key not in best or s.weight > best[key].weight:
+            best[key] = s
+    keep = inc.signals[-(MAX_SIGNALS // 2):]
+    ids = {id(s) for s in keep}
+    extra = [s for s in best.values() if id(s) not in ids]
+    inc.signals = sorted(extra + keep, key=lambda s: s.ts)
+
+
 def refresh(store: Store, inc: Incident, place: str | None = None):
     """Recompute confidence, severity, affected vehicles and title after any change."""
+    trim_signals(inc)
     inc.confidence = confidence(inc.signals)
     depths = [s for s in inc.signals if s.depth_cm is not None]
     if inc.type == "flood" and depths:
@@ -89,8 +123,8 @@ def refresh(store: Store, inc: Incident, place: str | None = None):
         inc.title = f"{label} · {place}"
     elif not inc.title or inc.title.split(" · ")[0] != label:
         inc.title = f"{label} · {inc.lat:.4f}, {inc.lon:.4f}" if not inc.title else f"{label} · {inc.title.split(' · ', 1)[-1]}"
-    if inc.status == "Reported" and inc.confidence >= config.PUBLISH_CONFIDENCE:
-        set_status(store, inc, "Verified")
+    if inc.status == "Reported" and can_auto_verify(inc):
+        set_status(store, inc, "Verified", reason="trusted evidence")
     inc.updated = now()
 
 

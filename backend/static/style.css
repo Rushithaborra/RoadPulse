@@ -61,3 +61,6 @@ summary { cursor: pointer; font-weight: 600; }
   aside { border-left: 0; border-top: 1px solid var(--line); }
   nav { margin-left: 0; }
 }
+.mapmode { font-size: 12px; padding: 3px 8px; border-radius: 6px; background: #fff4e5; border: 1px solid #f5c27a; color: #7a4a00; }
+.mapmode.osm { background: #e6f4ea; border-color: #9ad0a8; color: #1a5e2a; }
+.badge.sim { background: #fff; color: #7a4a00; border: 1px dashed #c98a1b; }

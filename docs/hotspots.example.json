@@ -1,0 +1,12 @@
+[
+  {
+    "id": "hs-1",
+    "name": "REPLACE with the real place name",
+    "sensor_id": "sensor-01",
+    "lat": 0.0,
+    "lon": 0.0,
+    "k_rain_cm_per_mm": 0.7,
+    "drain_cm_per_hr": 10.0,
+    "source_note": "How this spot was identified (site visit, news report, residents). Do not guess."
+  }
+]

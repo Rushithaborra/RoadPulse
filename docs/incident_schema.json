@@ -13,7 +13,7 @@
     "severity": {"enum": ["Low", "Medium", "Severe", "Closed"]},
     "confidence": {"type": "number", "minimum": 0, "maximum": 1},
     "status": {"enum": ["Reported", "Verified", "Responding", "Cleared"]},
-    "published": {"type": "boolean", "description": "shown to commuters and used in routing (confidence >= 0.7, active, not cleared)"},
+    "published": {"type": "boolean", "description": "shown to commuters and used in routing: status Verified or Responding, and active. Public reports alone never verify."},
     "active": {"type": "boolean", "description": "false for planned works whose window has not started"},
     "depth_cm": {"type": ["number", "null"]},
     "affected_vehicles": {"type": "array", "items": {"enum": ["two_wheeler", "auto", "car", "ambulance", "bus"]},
@@ -27,6 +27,7 @@
     "starts": {"type": ["number", "null"]},
     "ends": {"type": ["number", "null"]},
     "cleared_reason": {"type": ["string", "null"]},
+    "simulated": {"type": "boolean", "description": "true if any evidence came from the demo simulator"},
     "updated": {"type": "number"}
   }
 }

@@ -18,12 +18,17 @@ def handle_sensor(store: Store, r: SensorReading) -> dict:
     if h is None:
         return {"ok": False, "error": f"unknown sensor {r.sensor_id}"}
     with store.lock:
-        h.depth_cm, h.last_reading = max(0.0, r.depth_cm), ts
+        if h.last_reading is not None and ts < h.last_reading:
+            # late (buffered) reading: keep it in history, but never let it overwrite newer state
+            h.history.append((ts, max(0.0, r.depth_cm)))
+            return {"ok": True, "incident": None, "depth_cm": h.depth_cm, "stale": True}
+        h.depth_cm, h.last_reading, h.last_simulated = max(0.0, r.depth_cm), ts, r.simulated
         h.history.append((ts, h.depth_cm))
         h.above_count = h.above_count + 1 if h.depth_cm >= config.DEPTH_LOW else 0
         open_inc = next((i for i in store.incidents.values() if i.hotspot_id == h.id and i.status != "Cleared"), None)
         sig = Signal(source="sensor", type="flood", lat=h.lat, lon=h.lon, ts=ts,
-                     weight=config.SOURCE_WEIGHTS["sensor"], depth_cm=h.depth_cm, source_id=h.sensor_id)
+                     weight=config.SOURCE_WEIGHTS["sensor"], depth_cm=h.depth_cm, source_id=h.sensor_id,
+                     simulated=r.simulated)
         if open_inc is not None:
             # keep tracking depth (also below threshold) so auto-clear can see the water going down
             open_inc.signals.append(sig)
@@ -38,10 +43,9 @@ def handle_sensor(store: Store, r: SensorReading) -> dict:
 # ---------------- citizen reports ----------------
 
 def handle_report(store: Store, r: CitizenReport, road: str | None = None) -> Incident:
-    trust = store.reporter_trust[r.reporter_id]
+    # fixed weight: an unauthenticated reporter id cannot buy extra trust
     sig = Signal(source="report", type=r.type, lat=r.lat, lon=r.lon,
-                 weight=min(0.6, config.SOURCE_WEIGHTS["report"] * trust),
-                 source_id=r.reporter_id, note=r.note)
+                 weight=config.SOURCE_WEIGHTS["report"], source_id=r.reporter_id, note=r.note, simulated=r.simulated)
     place = _hotspot_name_near(store, r.lat, r.lon) or road
     hs = _hotspot_id_near(store, r.lat, r.lon) if r.type == "flood" else None
     return ingest(store, sig, place=place, hotspot_id=hs)
@@ -62,7 +66,8 @@ def _hotspot_id_near(store, lat, lon):
 
 
 def reward_reporters(store: Store, inc: Incident, confirmed: bool):
-    """Officer confirmation raises reporter trust; a false report lowers it."""
+    """Track reporter history for officers. Informational only: it does NOT change report weight,
+    because reporter ids are client-supplied."""
     for s in inc.signals:
         if s.source == "report" and s.source_id:
             t = store.reporter_trust[s.source_id]
@@ -83,7 +88,8 @@ def handle_probe(store: Store, rg: RoadGraph, p: ProbeSample) -> dict:
             store.probe_last_signal[edge] = ts
             (ulat, ulon), (vlat, vlon) = rg.node_latlon(edge[0]), rg.node_latlon(edge[1])
             sig = Signal(source="probe", type="slowdown", lat=(ulat + vlat) / 2, lon=(ulon + vlon) / 2, ts=ts,
-                         weight=config.SOURCE_WEIGHTS["probe"], source_id=f"edge:{edge[0]}-{edge[1]}")
+                         weight=config.SOURCE_WEIGHTS["probe"], source_id=f"edge:{edge[0]}-{edge[1]}",
+                         simulated=p.simulated)
             inc = ingest(store, sig, place=rg.g.edges[edge].get("name") or None)
             return {"ok": True, "edge": list(edge), "status": status, "incident": inc.id}
     return {"ok": True, "edge": list(edge), "status": status}
@@ -131,7 +137,7 @@ def handle_planned(store: Store, w: PlannedWork) -> Incident:
                        severity="Closed" if w.full_closure else "Medium",
                        title=f"Construction · {w.title} ({w.agency})")
         inc.signals.append(Signal(source="planned", type="construction", lat=w.lat, lon=w.lon,
-                                  weight=1.0, source_id=w.agency, note=w.title))
+                                  weight=1.0, source_id=w.agency, note=w.title, simulated=w.simulated))
         refresh(store, inc)
         inc.status = "Reported"
         inc.status_times["Reported"] = now()
@@ -149,7 +155,8 @@ def is_active(inc: Incident, ts: float) -> bool:
 
 
 def is_published(inc: Incident, ts: float) -> bool:
-    return is_active(inc, ts) and inc.confidence >= config.PUBLISH_CONFIDENCE
+    """Shown to commuters and used in routing only after verification (trusted evidence or an officer)."""
+    return is_active(inc, ts) and inc.status in ("Verified", "Responding")
 
 
 # ---------------- lifecycle ----------------

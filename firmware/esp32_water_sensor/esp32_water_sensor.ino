@@ -12,7 +12,7 @@
 const char* WIFI_SSID = "YOUR_WIFI";
 const char* WIFI_PASS = "YOUR_PASSWORD";
 const char* API_URL   = "http://192.168.1.10:8000/api/sensors/readings"; // your laptop/server IP; use https in production
-const char* DEVICE_KEY = "dev-sensor-key";   // must be in DEVICE_KEYS on the server
+const char* DEVICE_KEY = "CHANGE_ME";        // must be one of DEVICE_KEYS in the server .env
 const char* SENSOR_ID  = "sensor-01";        // must match a hotspot in backend/app/config.py
 float DRY_DISTANCE_CM  = 100.0;              // measured distance to the dry road surface at install time
 const unsigned long INTERVAL_MS = 2000;      // demo: every 2 s; real deployment: 30 s
