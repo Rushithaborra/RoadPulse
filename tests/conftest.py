@@ -1,9 +1,7 @@
 import os
 import sys
-import tempfile
 
-# configure before the app is imported
-os.environ.setdefault("DATABASE_PATH", os.path.join(tempfile.mkdtemp(), "test.db"))
+# configure before the app is imported (importing the app opens no database; the connection is made in its lifespan)
 os.environ.setdefault("CLEAR_WINDOW_S", "0")
 os.environ.setdefault("OFFICER_USERS", "officer:test-pass")
 os.environ.setdefault("DEVICE_KEYS", "test-key")
@@ -17,17 +15,15 @@ import pytest  # noqa: E402
 
 
 @pytest.fixture()
-def client():
+def client(tmp_path, monkeypatch):
+    # every test gets its own database file; pytest removes tmp_path later, after the app has closed the connection
+    monkeypatch.setenv("DATABASE_PATH", str(tmp_path / "test.db"))
     from fastapi.testclient import TestClient
     from app.main import S, app
     from app.store import store
-    for suffix in ("", "-wal", "-shm"):  # fresh database per test
-        p = os.environ["DATABASE_PATH"] + suffix
-        if os.path.exists(p):
-            os.remove(p)
     S.saved = {}
     store.reset()
-    with TestClient(app) as c:
+    with TestClient(app) as c:  # lifespan opens the database on enter and closes it on exit
         yield c
     store.reset()
 
