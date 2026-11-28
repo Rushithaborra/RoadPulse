@@ -36,7 +36,7 @@ async function search(q) { try { state.results = (await api(`/api/places?q=${enc
 function pins() {
   L_.pins.clearLayers();
   if (state.home) L.marker([state.home.lat, state.home.lon], { icon: RP.pinHtml("H", "#16a34a") }).addTo(L_.pins);
-  if (state.work) L.marker([state.work.lat, state.work.lon], { icon: RP.pinHtml("W", "#2563eb") }).addTo(L_.pins);
+  if (state.work) L.marker([state.work.lat, state.work.lon], { icon: RP.pinHtml("W", "#0e3a72") }).addTo(L_.pins);
   if (state.home && state.work) map.fitBounds(L.latLngBounds([[state.home.lat, state.home.lon], [state.work.lat, state.work.lon]]), { paddingTopLeft: [60, 90], paddingBottomRight: [60, innerHeight * 0.55], maxZoom: 17 });
 }
 function setPlace(key, p) { state[key] = { name: p.name, lat: p.lat, lon: p.lon }; state.field = null; state.results = []; pins(); render(); toast(`${key === "home" ? "Home" : "Work"}: ${p.name}`); }
@@ -98,7 +98,7 @@ async function demoDrive() {
     await startTrip();
     const r = await api("/api/routes", { method: "POST", body: JSON.stringify({ from_lat: sv.home[0], from_lon: sv.home[1], to_lat: sv.work[0], to_lon: sv.work[1], vehicle: state.sub.vehicle, alternatives: 1 }) });
     const pts = r.usual_route; if (!pts || pts.length < 2) throw new Error("No route between home and work.");
-    L_.trip.clearLayers(); L.polyline(pts, { color: "#2563eb", weight: 4, dashArray: "6 6" }).addTo(L_.trip);
+    L_.trip.clearLayers(); L.polyline(pts, { color: "#0e3a72", weight: 4, dashArray: "6 6" }).addTo(L_.trip);
     const d = (a, b) => map.distance(a, b); let i = 0, into = 0; const step = 9 * state.speed; sheet.set(0);
     state.sim = setInterval(() => { let left = step; while (left > 0 && i < pts.length - 1) { const dd = d(pts[i], pts[i + 1]) - into; if (left < dd) { into += left; left = 0; } else { left -= dd; i++; into = 0; } }
       if (i >= pts.length - 1) { stop(); toast("Demo drive finished."); return; } const a = pts[i], b = pts[i + 1], f = into / Math.max(d(a, b), 1); L_.pins.clearLayers(); post(a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f, 32); }, 1000); render();

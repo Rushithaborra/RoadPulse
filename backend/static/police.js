@@ -72,7 +72,7 @@ function callView() {
     <div><b>${done ? "Update what you see" : "What do you see?"}</b></div>
     <div class="grid3">${tiles.map(([k, n, note, ic, col]) => `<button class="tile ${dr.finding === k ? "on" : ""}" style="--c:${col};padding:14px 4px" data-find="${k}">${icon(ic, 26)}${n}<small>${note}</small></button>`).join("")}</div>
     <div><b>Need help here?</b></div>
-    <div class="grid2"><button class="tile ${dr.need.includes("ambulance") ? "on" : ""}" style="--c:#dc2626" data-need="ambulance">${icon("ambulance", 26)}Ambulance</button><button class="tile ${dr.need.includes("tow") ? "on" : ""}" style="--c:#2563eb" data-need="tow">${icon("tow", 26)}Tow vehicle</button></div>
+    <div class="grid2"><button class="tile ${dr.need.includes("ambulance") ? "on" : ""}" style="--c:#dc2626" data-need="ambulance">${icon("ambulance", 26)}Ambulance</button><button class="tile ${dr.need.includes("tow") ? "on" : ""}" style="--c:#0e3a72" data-need="tow">${icon("tow", 26)}Tow vehicle</button></div>
     <textarea id="note" placeholder="Anything the control room should know (optional)">${esc(dr.note)}</textarea>
     <div class="sheet-foot"><button class="btn-big" data-act="send" ${dr.finding ? "" : "disabled"}>Send to control room</button><button class="btn-big good" data-act="open">${icon("road", 22)} The road is open</button></div></div>`;
 }
@@ -117,7 +117,7 @@ document.addEventListener("keydown", (e) => { if (e.key === "Enter" && e.target.
 function focusCall() {
   M.layers.pins.clearLayers(); const c = call(); if (!c) return; const s = SEV[c.severity];
   L.marker([c.lat, c.lon], { icon: pinIcon(`<div class="pin sel" style="--c:${s.color}"><div class="dot2">${icon(KIND[c.type].ic, 20)}</div><div class="tag">${esc(KIND[c.type].short)}</div></div>`) }).addTo(M.layers.pins);
-  if (state.pos) { L.marker(state.pos, { icon: pinIcon('<div class="me"></div>') }).addTo(M.layers.pins); L.polyline([state.pos, [c.lat, c.lon]], { color: "#2563eb", weight: 5, dashArray: "8 8" }).addTo(M.layers.pins);
+  if (state.pos) { L.marker(state.pos, { icon: pinIcon('<div class="me"></div>') }).addTo(M.layers.pins); L.polyline([state.pos, [c.lat, c.lon]], { color: "#0e3a72", weight: 5, dashArray: "8 8" }).addTo(M.layers.pins);
     if (!focusCall.done || focusCall.id !== c.id) { focusCall.done = true; focusCall.id = c.id; map.fitBounds(L.latLngBounds([state.pos, [c.lat, c.lon]]), { paddingTopLeft: [60, 90], paddingBottomRight: [60, innerHeight * 0.55], maxZoom: 17 }); } }
   else if (focusCall.id !== c.id) { focusCall.id = c.id; map.flyTo([c.lat, c.lon], 17); }
 }

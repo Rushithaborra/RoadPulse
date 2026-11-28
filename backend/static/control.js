@@ -23,8 +23,8 @@ function drawUnits() {
   unitLayer.clearLayers();
   for (const u of state.unitList) {
     if (u.lat == null) continue; const stale = u.age_s > 120;
-    L.marker([u.lat, u.lon], { icon: RP.pinIcon(`<div class="pin" style="--c:#2563eb;opacity:${stale ? 0.55 : 1}"><div class="dot2" style="width:36px;height:36px">${icon("shield", 18)}</div><div class="tag" style="display:block">${esc(u.unit)}${stale ? " · " + Math.max(1, Math.round(u.age_s / 60)) + " min ago" : ""}</div></div>`) }).addTo(unitLayer);
-    for (const id of u.incidents) { const i = state.incidents.find((x) => x.id === id); if (i) L.polyline([[u.lat, u.lon], [i.lat, i.lon]], { color: "#2563eb", weight: 4, dashArray: "6 8" }).addTo(unitLayer); }
+    L.marker([u.lat, u.lon], { icon: RP.pinIcon(`<div class="pin" style="--c:#0e3a72;opacity:${stale ? 0.55 : 1}"><div class="dot2" style="width:36px;height:36px">${icon("shield", 18)}</div><div class="tag" style="display:block">${esc(u.unit)}${stale ? " · " + Math.max(1, Math.round(u.age_s / 60)) + " min ago" : ""}</div></div>`) }).addTo(unitLayer);
+    for (const id of u.incidents) { const i = state.incidents.find((x) => x.id === id); if (i) L.polyline([[u.lat, u.lon], [i.lat, i.lon]], { color: "#0e3a72", weight: 4, dashArray: "6 8" }).addTo(unitLayer); }
   }
 }
 async function loadUnitsMap() { try { state.unitList = (await api("/api/units")).units; } catch (e) { /* keep the last positions */ } drawUnits(); }
@@ -41,7 +41,7 @@ function timeline(i) {
   if (st.Verified) ev.push([st.Verified, i.urgent ? "You confirmed it as urgent (no police check)" : "You confirmed it: drivers warned"]);
   if (st.Responding) ev.push([st.Responding, "Diversion approved"]);
   ev.sort((a, b) => a[0] - b[0]);
-  return ev.length ? `<div><b class="small muted" style="text-transform:uppercase;letter-spacing:.06em">What happened</b><div class="stack" style="margin-top:6px;gap:0">${ev.map(([t, w]) => `<div class="row" style="flex-wrap:nowrap;gap:10px;padding:5px 0;border-bottom:1px solid var(--line)"><span class="small muted" style="min-width:48px">${clock(t)}</span><span>${esc(w)}</span></div>`).join("")}</div></div>` : "";
+  return ev.length ? `<div><b class="sec" style="display:block">What happened</b><div class="stack" style="margin-top:6px;gap:0">${ev.map(([t, w]) => `<div class="row" style="flex-wrap:nowrap;gap:10px;padding:5px 0;border-bottom:1px solid var(--line)"><span class="small muted" style="min-width:48px">${clock(t)}</span><span>${esc(w)}</span></div>`).join("")}</div></div>` : "";
 }
 const signedIn = () => !!RP.auth.token;
 const open = () => state.incidents.filter((i) => i.status !== "Cleared");
@@ -87,9 +87,10 @@ function queueCard(i) {
 }
 function queueView() {
   const p = pending(), a = active(), none = (t) => `<div class="empty">${icon("check", 34)}<br>${t}</div>`;
-  return `<div class="stack"><div class="row spread"><h2>Queue</h2><button class="link" data-act="signout">Sign out</button></div>
-    <h3 class="muted small" style="text-transform:uppercase;letter-spacing:.06em">Needs your decision</h3>${p.length ? `<div class="stack">${p.map(queueCard).join("")}</div>` : none("Nothing is waiting for you.")}
-    <h3 class="muted small" style="text-transform:uppercase;letter-spacing:.06em">Happening now</h3>${a.length ? `<div class="stack">${a.map(queueCard).join("")}</div>` : none("No active road problems.")}
+  return `<div class="stack"><div class="brandrow"><span class="mark" aria-hidden="true"></span><b>RoadPulse</b><span class="where">Control room</span></div>
+    <div class="row spread"><h2>Queue</h2><button class="link" data-act="signout">Sign out</button></div>
+    <h3 class="sec">Needs your decision</h3>${p.length ? `<div class="stack">${p.map(queueCard).join("")}</div>` : none("Nothing is waiting for you.")}
+    <h3 class="sec">Happening now</h3>${a.length ? `<div class="stack">${a.map(queueCard).join("")}</div>` : none("No active road problems.")}
     <p class="small muted">More tools: <a class="link" href="/classic">detailed view</a></p></div>`;
 }
 
@@ -153,8 +154,8 @@ function recovery(i) {
 // Notification history: anonymous on purpose (no names, no places): when, which kind of message, and whether Telegram carried it.
 const ALERT_LABEL = { pre_trip: "Warned before the trip", in_trip: "Warned on the road", uturn: "Told to turn back", no_alternative: "Warned: no way round", clear: "All-clear sent", route_change: "Route changed" };
 function alertHistory(d) {
-  const h = d.alert_history || []; if (!h.length) return `<div data-alerts><b class="small muted" style="text-transform:uppercase;letter-spacing:.06em">Warnings sent</b><p class="small muted" style="margin:6px 0 0">None yet. Nobody signed up for alerts has this road on their route.</p></div>`;
-  return `<div data-alerts><b class="small muted" style="text-transform:uppercase;letter-spacing:.06em">Warnings sent (${h.length})</b><div class="stack" style="margin-top:6px;gap:0">${h.slice(-8).map((a) => `<div class="row" style="flex-wrap:nowrap;gap:10px;padding:5px 0;border-bottom:1px solid var(--line)"><span class="small muted" style="min-width:48px">${clock(a.ts)}</span><span>${esc(ALERT_LABEL[a.kind] || a.kind.replace(/_/g, " "))}${a.telegram ? " · Telegram" : ""}</span></div>`).join("")}</div></div>`;
+  const h = d.alert_history || []; if (!h.length) return `<div data-alerts><b class="sec" style="display:block">Warnings sent</b><p class="small muted" style="margin:6px 0 0">None yet. Nobody signed up for alerts has this road on their route.</p></div>`;
+  return `<div data-alerts><b class="sec" style="display:block">Warnings sent (${h.length})</b><div class="stack" style="margin-top:6px;gap:0">${h.slice(-8).map((a) => `<div class="row" style="flex-wrap:nowrap;gap:10px;padding:5px 0;border-bottom:1px solid var(--line)"><span class="small muted" style="min-width:48px">${clock(a.ts)}</span><span>${esc(ALERT_LABEL[a.kind] || a.kind.replace(/_/g, " "))}${a.telegram ? " · Telegram" : ""}</span></div>`).join("")}</div></div>`;
 }
 function detailView() {
   const i = state.incidents.find((x) => x.id === state.selected); if (!i) { state.selected = null; return queueView(); }

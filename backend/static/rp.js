@@ -93,9 +93,11 @@ window.RP = (() => {
       L.tileLayer(`${ESRI}/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}`, { maxZoom: 19 })]);
     const layers = { inc: L.layerGroup().addTo(map), trip: L.layerGroup().addTo(map), pins: L.layerGroup().addTo(map) };
     const m = { map, layers, style: store.get("rp_style") || "map",
-      setStyle(name) { m.style = name; map.removeLayer(street); map.removeLayer(sat); (name === "sat" ? sat : street).addTo(map); store.set("rp_style", name); },
+      setStyle(name) { m.style = name; map.removeLayer(street); map.removeLayer(sat); (name === "sat" ? sat : street).addTo(map); map.getContainer().classList.toggle("sat", name === "sat"); store.set("rp_style", name); },
       toggleStyle() { m.setStyle(m.style === "sat" ? "map" : "sat"); } };
     map.setView(center, zoom); m.setStyle(m.style);
+    // desktop: a 400 px panel covers the left of the map, so start centred in the part people can see
+    if (window.matchMedia("(min-width: 900px)").matches) map.panBy([-216, 0], { animate: false });
     const labels = () => map.getContainer().classList.toggle("labels", map.getZoom() >= 17);
     map.on("zoomend", labels); labels();
     return m;
@@ -110,9 +112,17 @@ window.RP = (() => {
         L.polyline(seg, { color: s.color, weight: 8, opacity: 0.95, dashArray: pending ? "6 8" : null }).addTo(layer);
       }
       const tag = pending ? `${KIND[i.type].short} · ${pendingTag}` : `${KIND[i.type].short} · ${s.label}`;
-      L.marker([i.lat, i.lon], { icon: pinIcon(`<div class="pin ${pending ? "pending" : ""} ${selected === i.id ? "sel" : ""}" style="--c:${s.color}"><div class="dot2">${icon(KIND[i.type].ic, 20)}</div><div class="tag">${esc(tag)}</div></div>`) })
+      const live = !pending && published(i) && SEV_RANK[i.severity] >= 1;  // pulse only what drivers are being warned about
+      L.marker([i.lat, i.lon], { icon: pinIcon(`<div class="pin ${pending ? "pending" : ""} ${live ? "live" : ""} ${selected === i.id ? "sel" : ""}" style="--c:${s.color}"><div class="dot2">${icon(KIND[i.type].ic, 20)}</div><div class="tag">${esc(tag)}</div></div>`) })
         .on("click", () => onClick && onClick(i.id)).addTo(layer);
     }
+  }
+  // draw a route line once, along the road (CSS .route-in); dashed "usual route" lines are not animated
+  function drawRoute(layer, coords, color, dash) {
+    L.polyline(coords, { color: "#fff", weight: 11, opacity: 0.9 }).addTo(layer);
+    const line = L.polyline(coords, { color, weight: 6, dashArray: dash }).addTo(layer);
+    if (!dash && line._path) { line._path.setAttribute("pathLength", "1"); line._path.classList.add("route-in"); }
+    return line;
   }
   const pinHtml = (letter, color) => pinIcon(`<div class="ab" style="background:${color}">${letter}</div>`);
 
@@ -134,5 +144,5 @@ window.RP = (() => {
       el.className = "chip " + (s.connected ? "done" : "warnc"); el.textContent = s.connected ? (age < 5 ? "live" : `updated ${age}s ago`) : "offline"; };
     setInterval(draw, 1000); draw();
   }
-  return { $, esc, clock, store, icon, KIND, SEV, SEV_RANK, VEH, meter, published, headline, reason, vehicleNote, evidence, toast, auth, api, makeMap, pinIcon, pinHtml, drawIncidents, makeSheet, bindLive };
+  return { $, esc, clock, store, icon, KIND, SEV, SEV_RANK, VEH, meter, published, headline, reason, vehicleNote, evidence, toast, auth, api, makeMap, pinIcon, pinHtml, drawIncidents, drawRoute, makeSheet, bindLive };
 })();

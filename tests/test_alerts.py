@@ -453,6 +453,12 @@ class TestBoards:
         assert b["lines"][0]["title"] == "Accident" and b["lines"][0]["metres"] <= 600
         assert b["alternatives"], "and it must name roads that are still fine"
 
+    def test_a_board_never_suggests_the_road_it_says_to_avoid(self, client, officer_headers):
+        publish_accident(client, officer_headers, "n0_0", "n0_1")
+        for b in client.get("/api/boards").json()["boards"]:
+            avoid = {l["road"] for l in b["lines"]}
+            assert not avoid & set(b["alternatives"]), (b["id"], avoid, b["alternatives"])
+
     def test_board_goes_blank_when_the_incident_clears(self, client, officer_headers):
         iid = publish_accident(client, officer_headers)
         client.post(f"/api/incidents/{iid}/clear", headers=officer_headers)

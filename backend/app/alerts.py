@@ -483,17 +483,24 @@ def board_view(rg: RoadGraph, board: dict, incidents: list) -> dict:
             for inc in incs:
                 cur = flags.get((first, inc.id))
                 if cur is None or dist[u] < cur["dist"]:
-                    flags[(first, inc.id)] = {"first": first, "dist": dist[u], "inc": inc}
+                    flags[(first, inc.id)] = {"first": first, "dist": dist[u], "inc": inc, "path": path}
     lines, bad = [], set()
     for (first, _), f in sorted(flags.items(), key=lambda kv: kv[1]["dist"]):
-        name = rg.g.edges[node, first].get("name") or "this road"
         inc = f["inc"]
+        # The first piece out of the junction is often an unnamed stub; name the line after the first named road
+        # on the way, then the incident's own road, so the board never says "avoid this road" when a name exists.
+        p = f["path"]
+        name = next((rg.g.edges[a, b].get("name") for a, b in zip(p, p[1:]) if rg.g.edges[a, b].get("name")), None) \
+            or rg.road_name(inc.lat, inc.lon) or "this road"
         bad.add(first)
         key = (name, inc.id)
         if any((x["road"], x["incident"]) == key for x in lines):
             continue   # several unnamed side roads would repeat the same line
         lines.append({"road": name, "incident": inc.id, "title": _label(inc), "severity": inc.severity,
                       "metres": int(round(f["dist"] / 10.0) * 10)})
-    alts = sorted({rg.g.edges[node, s].get("name") or "side road" for s in rg.g.successors(node) if s not in bad})
+    avoid = {x["road"] for x in lines}
+    alts = sorted({rg.g.edges[node, s].get("name") or "side road" for s in rg.g.successors(node) if s not in bad} - avoid)
+    if len(alts) > 1:
+        alts = [a for a in alts if a != "side road"]   # a named way round says more than "side road"
     return {"id": board["id"], "name": board["name"], "lat": board["lat"], "lon": board["lon"], "lines": lines,
             "alternatives": alts, "simulated": True}

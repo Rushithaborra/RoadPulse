@@ -147,3 +147,9 @@ def test_slowdown_merges_with_nearby_accident_not_distant_flood(client, officer_
     all_inc = client.get("/api/incidents?scope=all", headers=officer_headers).json()["incidents"]
     flood = next(i for i in all_inc if i["type"] == "flood")
     assert "probe" not in flood["signals_by_source"]
+
+
+def test_demo_hub_page_is_served_fresh(client):
+    r = client.get("/demo")
+    assert r.status_code == 200 and "Who are you?" in r.text
+    assert r.headers.get("cache-control") == "no-cache"

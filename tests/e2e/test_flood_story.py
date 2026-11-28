@@ -128,8 +128,9 @@ def test_the_flood_story_end_to_end(live, pages):
     warning = [b for b in boards if b["lines"]]
     assert warning, f"no simulated board is within reach of the incident: {boards}"
     board = pages.open(f"/board?id={warning[0]['id']}", label="board")
-    expect(board.locator(".line .big")).to_contain_text("AVOID")
-    expect(board.locator("header")).to_contain_text("SIMULATED DISPLAY")
+    expect(board.locator(".panel .l2")).to_contain_text(re.compile("avoid", re.I))
+    expect(board.locator(".sign")).to_have_attribute("aria-label", re.compile("ahead", re.I))
+    expect(board.locator(".plate")).to_contain_text("Simulated display")
 
     # the control room sees that people were warned, anonymously
     expect(control.locator("[data-alerts]")).to_contain_text(re.compile(r"Warned (before the trip|on the road)|Told to turn back|no way round"), timeout=20000)
@@ -151,7 +152,7 @@ def test_the_flood_story_end_to_end(live, pages):
     expect(driver.locator(".card.alert.clear")).to_be_visible(timeout=20000)
     expect(commuter.locator(".hero.ok")).to_contain_text("Your way is clear", timeout=20000)
     expect(citizen.locator('[data-report-status="resolved"]')).to_contain_text("Resolved", timeout=25000)
-    expect(board.locator(".clear")).to_contain_text("ROAD CLEAR", timeout=15000)
+    expect(board.locator(".sign")).to_have_attribute("aria-label", re.compile("road clear", re.I), timeout=15000)
     assert live.incidents("public") == []
 
     assert not pages.problems(), pages.problems()

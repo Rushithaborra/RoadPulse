@@ -34,7 +34,7 @@ def check_ids(page, script, created_in_js):
 
 
 def test_every_stylesheet_and_script_the_pages_load_exists():
-    for page in ("index.html", "control.html", "police.html", "classic.html", "commute.html", "board.html"):
+    for page in ("index.html", "control.html", "police.html", "classic.html", "commute.html", "board.html", "demo.html"):
         for ref in re.findall(r'(?:href|src)="/static/([^"]+)"', read(page)):
             assert os.path.exists(os.path.join(STATIC, ref)), f"{page}: {ref}"
 
@@ -86,3 +86,17 @@ def test_phone_first_features_are_in_place():
     assert "waiting to send" in pol and "wakeLock" in pol and "watchPosition" in pol and "sheet-foot" in pol      # no-signal queue, screen on, live distance, thumb actions
     css = read("rp.css")
     assert "min-height: 44px" in css and "safe-area-inset-bottom" in css and "font-size: 16px" in css            # thumb targets, notches, no iOS zoom
+
+
+def test_demo_hub_links_to_every_screen_and_its_ids_exist():
+    page = read("demo.html")
+    for href in ("/", "/control", "/police", "/board", "/commute", "/classic"):
+        assert f'href="{href}"' in page, href
+    ids = set(re.findall(r'\bid="([^"]+)"', page))
+    used = set(re.findall(r'RP\.\$\("([A-Za-z0-9_-]+)"\)', page))
+    assert used <= ids, used - ids
+
+
+def test_bundled_font_files_exist():
+    for w in (400, 600, 800):
+        assert os.path.exists(os.path.join(STATIC, "vendor", "fonts", f"overpass-latin-{w}-normal.woff2"))

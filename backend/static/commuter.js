@@ -41,9 +41,9 @@ function probCard(i) {
 function overview() {
   if (!state.loaded) return '<div class="stack"><div class="skel"></div><div class="skel"></div><div class="skel"></div></div>';
   const list = worst();
-  return `<div class="stack">${hero()}${list.length ? `<div class="stack">${list.map(probCard).join("")}</div>` : ""}${myReports()}
+  return `<div class="stack"><div class="brandrow"><span class="mark" aria-hidden="true"></span><b>RoadPulse</b><span class="where">Dwaraka Nagar, Visakhapatnam</span></div>${hero()}${list.length ? `<div class="stack">${list.map(probCard).join("")}</div>` : ""}${myReports()}
     <div class="card row spread"><div class="row" style="flex-wrap:nowrap"><span style="color:var(--brand)">${icon("bell", 24)}</span><div><b>Get warned on your phone</b><div class="small muted">Only if a problem is on your route.</div></div></div><a class="btn-sm" href="/commute">Set up</a></div>
-    <p class="small muted" style="text-align:center">Staff: <a class="link" href="/control">Control room</a> · <a class="link" href="/police">Traffic police</a></p></div>`;
+    <p class="small muted" style="text-align:center">Staff: <a class="link" href="/control">Control room</a> · <a class="link" href="/police">Traffic police</a> · <a class="link" href="/demo">All screens</a></p></div>`;
 }
 // ------------------------------------------------------------------ "Your reports": follow each report to its outcome
 const OUTCOME = { pending: ["Waiting for a check", "Traffic police and the control room check every report before other drivers are warned."],
@@ -52,7 +52,7 @@ const OUTCOME = { pending: ["Waiting for a check", "Traffic police and the contr
 function myReports() {
   if (!state.mine.length) return "";
   return `<div class="card stack" data-my-reports><b>Your reports</b>${state.mine.map((r) => { const [t, why] = OUTCOME[r.outcome] || OUTCOME.gone;
-    return `<div class="row" style="flex-wrap:nowrap;gap:10px" data-report-status="${esc(r.outcome)}"><span class="ico" style="--c:#2563eb">${icon(KIND[r.type] ? KIND[r.type].ic : "warn", 20)}</span><div class="grow"><b>${esc((KIND[r.type] || KIND.slowdown).name)}</b> <span class="chip ${r.outcome === "pending" ? "warnc" : "done"}">${esc(t)}</span><div class="small muted">${esc(why)}</div></div></div>`; }).join("")}</div>`;
+    return `<div class="row" style="flex-wrap:nowrap;gap:10px" data-report-status="${esc(r.outcome)}"><span class="ico" style="--c:#0e3a72">${icon(KIND[r.type] ? KIND[r.type].ic : "warn", 20)}</span><div class="grow"><b>${esc((KIND[r.type] || KIND.slowdown).name)}</b> <span class="chip ${r.outcome === "pending" ? "warnc" : "done"}">${esc(t)}</span><div class="small muted">${esc(why)}</div></div></div>`; }).join("")}</div>`;
 }
 const saveMine = () => RP.store.set("rp_mine", JSON.stringify(state.mine.slice(0, 6)));
 async function pollMine(force) {
@@ -87,7 +87,7 @@ function tripView() {
   else if (!t) body = `<p class="muted"><span class="spin"></span>Checking your route…</p>`;
   else body = t.html;
   return `<div class="stack"><div class="row spread"><h2>Check my trip</h2><button class="link" data-act="reset">Start again</button></div>${picker}${body}
-    <button class="btn-big ghost" data-act="example">Try an example trip</button></div>`;
+    ${t ? "" : '<button class="btn-big ghost" data-act="example">Try an example trip</button>'}</div>`;
 }
 function resultsHtml() {
   const r = state.search.results; if (!r.length) return '<p class="muted small">No places match. Try a road name.</p>';
@@ -113,7 +113,14 @@ function openSearch() { setView("search"); sheet.set(2); searchPlaces(""); setTi
 $("body").addEventListener("input", (e) => { const f = e.target.dataset && e.target.dataset.f; if (!f) return; state.search.field = f; clearTimeout(tSearch); tSearch = setTimeout(() => searchPlaces(e.target.value), 150); });
 $("body").addEventListener("input", (e) => { if (e.target.id === "report-note") state.report.note = e.target.value; });
 $("body").addEventListener("focusin", (e) => { const f = e.target.dataset && e.target.dataset.f; if (f) { state.search.field = f; sheet.set(2); } });
-function fitTrip() { map.fitBounds(L.latLngBounds([state.A, state.B]), { paddingTopLeft: [60, 110], paddingBottomRight: [60, sheet.phone() ? innerHeight * 0.52 : 60], maxZoom: 17 }); }
+// What part of the map is hidden: the pill on top, and the sheet (phones) or the side card (desktop).
+const covered = () => (sheet.phone() ? { l: 0, t: 90, r: 56, b: Math.round(innerHeight * 0.5) } : { l: 432, t: 0, r: 0, b: 0 });
+function focusOn(ll, z) {   // centre a point in the visible part of the map, not behind the sheet
+  const c = covered(), off = L.point((c.l - c.r) / 2, (c.t - c.b) / 2);
+  map.flyTo(map.unproject(map.project(ll, z).subtract(off), z), z, { duration: 0.6 });
+}
+const fitPad = () => { const c = covered(); return { paddingTopLeft: [c.l + 40, c.t + 30], paddingBottomRight: [c.r + 40, c.b + 30] }; };
+function fitTrip() { map.fitBounds(L.latLngBounds([state.A, state.B]), { ...fitPad(), maxZoom: 17 }); }
 function pickPlace(k) { const p = state.search.results[k]; if (p) applyPlace(p); }
 function applyPlace(p) {
   const ll = [p.lat, p.lon];
@@ -142,7 +149,7 @@ function reportView() {
 function renderSheet() {
   const v = state.view, body = $("body");
   body.innerHTML = v === "problem" ? problemView() : v === "trip" ? tripView() : v === "report" ? reportView() : v === "search" ? searchView() : overview();
-  $("btn-report").classList.toggle("hidden", v === "report" || v === "search");
+  $("btn-report").classList.toggle("hidden", v !== "overview");
   document.querySelector(".topbar").classList.toggle("hidden", v === "search" && sheet.phone());   // the full-height search covers the pill
 }
 
@@ -170,7 +177,7 @@ async function shareProblem(i) {
 }
 function select(id) {
   state.selected = id; const i = state.incidents.find((x) => x.id === id); if (!i) return;
-  map.flyTo([i.lat, i.lon], 18, { duration: 0.6 }); setView("problem"); drawMap(); sheet.set(1);
+  setView("problem"); drawMap(); sheet.set(1); focusOn([i.lat, i.lon], 18);
 }
 function drawTripPins() {
   L_.pins.clearLayers();
@@ -187,9 +194,9 @@ function exampleTrip(i) {
     const pts = i.affected_segments.flat().map((p) => [p[0], p[1]]), kx = 111320 * Math.cos((i.lat * Math.PI) / 180), ky = 111320;
     let best = [pts[0], pts[pts.length - 1]], bd = -1;
     for (const a of pts) for (const b of pts) { const d = ((a[1] - b[1]) * kx) ** 2 + ((a[0] - b[0]) * ky) ** 2; if (d > bd) { bd = d; best = [a, b]; } }
-    state.A = best[0]; state.B = best[1]; map.flyTo([i.lat, i.lon], 18, { duration: 0.6 });
-  } else { state.A = state.center; state.B = [17.7238639, 83.3068879]; map.fitBounds([state.A, state.B], { padding: [80, 80] }); }
-  drawTripPins(); setView("trip"); runTrip();
+    state.A = best[0]; state.B = best[1];
+  } else { state.A = state.center; state.B = [17.7238639, 83.3068879]; }
+  drawTripPins(); setView("trip"); sheet.set(1); runTrip();
 }
 // quiet = a refresh of a trip already on screen (an incident appeared or changed): keep the old card until the new one is ready.
 async function runTrip(quiet) {
@@ -199,23 +206,28 @@ async function runTrip(quiet) {
   try { const r = await api("/api/routes", { method: "POST", body: JSON.stringify({ from_lat: state.A[0], from_lon: state.A[1], to_lat: state.B[0], to_lon: state.B[1], vehicle: state.vehicle, alternatives: 2 }) });
     if (seq !== runTrip.seq) return; L_.trip.clearLayers(); html = tripCard(r); }
   catch (e) { if (seq !== runTrip.seq) return; L_.trip.clearLayers(); html = `<div class="hero bad"><span class="ic">${icon("warn", 24)}</span><div><b>Could not check this trip</b>${esc(e.message)}</div></div>`; }
-  state.trip = { html }; renderPill(); renderSheet(); if (!quiet) sheet.set(1);
+  state.trip = { html }; renderPill(); renderSheet();
+  if (!quiet) { sheet.set(1); const b = L_.trip.getLayers().filter((l) => l.getBounds).reduce((acc, l) => acc.extend(l.getBounds()), L.latLngBounds([state.A, state.B]));
+    setTimeout(() => map.fitBounds(b, { ...fitPad(), maxZoom: 18 }), 280); }
   if (before && before !== html) toast("Your trip was updated: road conditions changed.");
 }
 function tripCard(r) {
   const best = r.routes && r.routes[0], mins = (s) => Math.max(1, Math.round(s / 60));
   const card = (tone, ic, title, body, extra = "") => `<div class="hero ${tone}"><span class="ic">${icon(ic, 26)}</span><div><b>${esc(title)}</b>${body}${extra}</div></div>`;
   if (r.no_route || !best) return card("bad", "stop", "No way to get there", "There is no road route between these points for your vehicle.");
-  const line = (c, col, dash) => { L.polyline(c, { color: "#fff", weight: 11, opacity: 0.9 }).addTo(L_.trip); L.polyline(c, { color: col, weight: 6, dashArray: dash }).addTo(L_.trip); };
+  const line = (c, col, dash) => RP.drawRoute(L_.trip, c, col, dash);
   const hits = r.usual_route_hits || [], km = (best.length_m / 1000).toFixed(1);
-  if (!hits.length) { line(best.coords, "#2563eb"); return card("ok", "check", "Your way is clear", `About ${mins(best.time_s)} min, ${km} km.`); }
+  if (!hits.length) { line(best.coords, "#0e3a72"); return card("ok", "check", "Your way is clear", `About ${mins(best.time_s)} min, ${km} km.`); }
   const w = hits.reduce((a, b) => (SEV_RANK[b.severity] > SEV_RANK[a.severity] ? b : a)), s = SEV[w.severity], what = `${(KIND[w.type] || KIND.slowdown).name} on ${w.road || "your road"}`;
-  const extra = Math.max(0, Math.round((best.time_s - (r.usual_time_s || best.time_s)) / 60)), more = extra < 1 ? "about the same time" : `${extra} min longer`;
+  const extra = Math.max(0, mins(best.time_s) - mins(r.usual_time_s || best.time_s)), more = extra < 1 ? "about the same time" : `${extra} min longer`;
   if (JSON.stringify(best.coords) === JSON.stringify(r.usual_route)) { line(best.coords, s.color); return card("warn", "warn", "A problem on your way", `${esc(what)} is ${s.label.toLowerCase()}. No faster way round, so expect delays.`); }
   line(r.usual_route, "#dc2626", "8 8"); line(best.coords, "#16a34a");
   const todo = { Closed: `You can't go that way. Take the green route: ${more}.`, Severe: `Take the green route if you can: ${more}.`, Medium: `Green route only if you are in a hurry: ${more}.`, Low: `You can carry on, or take the green route (${more}).` }[w.severity];
-  const key = '<div class="row small" style="margin-top:6px;gap:14px"><span style="color:#dc2626">- - Your usual way</span><span style="color:#16a34a">— Better way</span></div>';
-  return card(w.severity === "Closed" ? "bad" : w.severity === "Low" ? "ok" : "warn", w.severity === "Closed" ? "stop" : "warn", w.severity === "Closed" ? "Your usual way is blocked" : "A problem on your usual way", `${esc(what)} is ${s.label.toLowerCase()}. ${esc(todo)}`, key);
+  const usual = r.usual_time_s || best.time_s, blocked = w.severity === "Closed";
+  const cmp = `<div class="cmp" role="list">
+    <div class="opt best" role="listitem"><span class="sw"></span><div class="grow"><b>Way round</b><small>${(best.length_m / 1000).toFixed(1)} km, no problems reported</small></div><span class="t">${mins(best.time_s)}<small>min</small></span></div>
+    <div class="opt usual" role="listitem"><span class="sw"></span><div class="grow"><b>Your usual way</b><small>${esc(what)}</small></div><span class="t">${blocked ? "&times;" : `${mins(usual)}<small>min if clear</small>`}</span></div></div>`;
+  return card(w.severity === "Closed" ? "bad" : w.severity === "Low" ? "ok" : "warn", w.severity === "Closed" ? "stop" : "warn", w.severity === "Closed" ? "Your usual way is blocked" : "A problem on your usual way", `${esc(what)} is ${s.label.toLowerCase()}. ${esc(todo)}`) + cmp;
 }
 async function sendReport() {
   const b = $("send-report"); b.disabled = true;
@@ -234,7 +246,7 @@ $("btn-locate").onclick = () => {
 };
 map.on("click", (e) => {
   const ll = [e.latlng.lat, e.latlng.lng];
-  if (state.view === "report") { state.report.pt = ll; L_.pins.clearLayers(); L.marker(ll, { icon: pinHtml("!", "#2563eb") }).addTo(L_.pins); renderSheet(); sheet.set(1); return; }
+  if (state.view === "report") { state.report.pt = ll; L_.pins.clearLayers(); L.marker(ll, { icon: pinHtml("!", "#0e3a72") }).addTo(L_.pins); renderSheet(); sheet.set(1); return; }
   if (!state.A || (state.A && state.B)) { state.A = ll; state.An = state.Bn = null; state.B = state.trip = null; L_.trip.clearLayers(); drawTripPins(); setView("trip"); }
   else { state.B = ll; state.Bn = null; drawTripPins(); setView("trip"); runTrip(); }
 });
@@ -252,8 +264,8 @@ async function refresh(force) {
       state.seen = ids; state.incidents = r.incidents; state.sig = sig; drawMap(); if (state.view === "overview" || state.view === "problem") renderSheet();
       if (!force && state.A && state.B && state.view === "trip") runTrip(true);   // the road situation changed: check the trip again, no tap needed
       document.title = `${visible().length ? `(${visible().length}) ` : ""}RoadPulse — know before you go`;
-      if (!state.fitted && visible().length) { state.fitted = true; const pts = visible().map((i) => [i.lat, i.lon]); const pad = sheet.phone() ? innerHeight * 0.5 : 0;
-        map.fitBounds(L.latLngBounds(pts), { paddingTopLeft: [60, 110], paddingBottomRight: [60, 60 + pad], maxZoom: 17 }); }
+      if (!state.fitted && visible().length) { state.fitted = true; const pts = visible().map((i) => [i.lat, i.lon]);
+        map.fitBounds(L.latLngBounds(pts), { ...fitPad(), maxZoom: 17 }); }
     }
   } catch (e) { state.connected = false; if (state.loaded) $("offline").classList.remove("hidden"); }
 }

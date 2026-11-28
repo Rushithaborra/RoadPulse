@@ -168,7 +168,7 @@ async def request_log(request: Request, call_next):
                  (time.perf_counter() - t0) * 1000)
     resp.headers["X-Request-ID"] = rid
     p = request.url.path
-    if p in ("/", "/classic", "/commute", "/board", "/control", "/police") or p.startswith("/static/"):
+    if p in ("/", "/demo", "/classic", "/commute", "/board", "/control", "/police") or p.startswith("/static/"):
         resp.headers["Cache-Control"] = "no-cache"  # revalidate (ETag) so a redeployed UI is never served stale
     elif p.startswith(("/api/subscribers", "/api/auth", "/api/police", "/api/stream/ticket", "/api/audit")):
         resp.headers["Cache-Control"] = "no-store"  # private data and tokens must not sit in any browser or proxy cache
@@ -954,3 +954,9 @@ def commute_page():
 @app.get("/board", include_in_schema=False)
 def board_page():
     return FileResponse(os.path.join(STATIC_DIR, "board.html"))
+
+
+@app.get("/demo", include_in_schema=False)
+def demo_page():
+    """One front door for demos: links to the commuter, control room and police apps and the other screens."""
+    return FileResponse(os.path.join(STATIC_DIR, "demo.html"))
