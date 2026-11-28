@@ -135,3 +135,27 @@ def test_duplicate_reports_of_one_event_are_one_incident(client, officer_headers
     assert len(ids) == 1
     mine = [i for i in client.get("/api/incidents?scope=all", headers=officer_headers).json()["incidents"] if i["id"] in ids]
     assert len(mine) == 1 and mine[0]["status"] == "Reported"
+
+
+# ---------------- report fields ----------------
+
+def test_a_report_photo_link_must_be_a_web_link(client):
+    hs = hotspot(client)
+    base = {"type": "accident", "lat": hs["lat"] + 0.002, "lon": hs["lon"], "reporter_id": "p1"}
+    for bad in ("javascript:alert(1)", "data:text/html,<script>1</script>", "file:///etc/passwd"):
+        r = client.post("/api/reports", json={**base, "photo_url": bad})
+        assert r.status_code == 422, (bad, r.status_code)
+    assert client.post("/api/reports", json={**base, "photo_url": "https://example.com/p.jpg"}).status_code == 201
+
+
+def test_the_public_incident_view_carries_no_private_or_staff_fields(client, officer_headers):
+    hs = hotspot(client)
+    iid = flood(client)
+    client.post("/api/reports", json={"type": "flood", "lat": hs["lat"], "lon": hs["lon"], "reporter_id": "secret-reporter-77", "note": "my private note"})
+    pub = client.get(f"/api/incidents/{iid}").json()
+    text = str(pub) + str(client.get("/api/incidents").json()) + str(client.get("/api/feed").json())
+    assert "secret-reporter-77" not in text and "my private note" not in text, "reporter ids and notes are staff-only"
+    for staff_only in ("signals", "alert_history", "assignments", "field_reports", "requests"):
+        assert staff_only not in pub, staff_only
+    staff = client.get(f"/api/incidents/{iid}", headers=officer_headers).json()
+    assert "signals" in staff and "alert_history" in staff

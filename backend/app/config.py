@@ -25,12 +25,11 @@ REVIEW_CONFIDENCE = _f("REVIEW_CONFIDENCE", 0.4)     # shown to officers as "unv
 # their reporter_id is client-supplied, so any number of reports counts as one untrusted source.
 # Speed probes are deliberately NOT trusted: slow traffic has many innocent causes (a slow driver, a signal queue,
 # ordinary congestion), so speed only raises a "Suspected slowdown" for officers and never verifies on its own.
-TRUSTED_SOURCES = {"sensor", "cctv", "planned", "officer"}
+TRUSTED_SOURCES = {"sensor", "planned", "officer"}
 
 SOURCE_WEIGHTS = {
     "sensor": 0.8,
     "probe": 0.4,
-    "cctv": 0.5,
     "report": 0.35,
     "field": 0.9,   # traffic police on the scene: strong evidence, but NOT a trusted auto-publisher (control room confirms)
     "planned": 1.0,
