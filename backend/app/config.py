@@ -34,6 +34,7 @@ SOURCE_WEIGHTS = {
     "report": 0.35,
     "planned": 1.0,
     "officer": 1.0,
+    "field": 0.9,   # on-ground police confirmation; publishes only through the two-check rule (review.py)
 }
 
 # Speed-probe anomaly rule

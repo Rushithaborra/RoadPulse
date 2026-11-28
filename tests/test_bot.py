@@ -52,6 +52,8 @@ def test_full_commute_flow_over_telegram(bot, client, officer_headers):
     iid = client.post("/api/reports", json={"type": "accident", "lat": (alat + blat) / 2, "lon": (alon + blon) / 2,
                                             "reporter_id": "c"}).json()["incident_id"]
     client.post(f"/api/incidents/{iid}/verify", json={"severity": "Closed"}, headers=officer_headers)
+    from conftest import field_login
+    client.post(f"/api/field/incidents/{iid}/confirm", json={"severity": "Closed"}, headers=field_login(client))
     share(b, client, 7, "n0_-4", live=True, edited=True)
     sub = b.subs[7]
     alerts = client.get(f"/api/subscribers/{sub['id']}/alerts", headers={"X-Subscriber-Token": sub["token"]}).json()["alerts"]

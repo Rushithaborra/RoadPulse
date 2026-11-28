@@ -1,0 +1,24 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "RoadPulse server (debug)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "uvicorn",
+      "args": ["app.main:app", "--app-dir", "backend", "--env-file", ".env", "--no-access-log", "--timeout-graceful-shutdown", "3"],
+      "cwd": "${workspaceFolder}",
+      "justMyCode": true,
+      "serverReadyAction": { "pattern": "Uvicorn running on (https?://\\S+)", "uriFormat": "%s", "action": "openExternally" }
+    },
+    {
+      "name": "Demo: flood story",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/simulator/demo.py",
+      "args": ["story"],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal"
+    }
+  ]
+}

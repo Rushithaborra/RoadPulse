@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 IncidentType = Literal["flood", "accident", "blockage", "construction", "slowdown"]
 Severity = Literal["Low", "Medium", "Severe", "Closed"]
 Status = Literal["Reported", "Verified", "Responding", "Cleared"]
-Source = Literal["sensor", "probe", "cctv", "report", "planned", "officer"]
+Source = Literal["sensor", "probe", "cctv", "report", "planned", "officer", "field"]
 VehicleClass = Literal["two_wheeler", "auto", "car", "ambulance", "bus"]
 
 SEVERITY_ORDER = {"Low": 0, "Medium": 1, "Severe": 2, "Closed": 3}
@@ -59,6 +59,10 @@ class Incident(BaseModel):
     hotspot_id: Optional[str] = None
     dispatched: list[dict] = Field(default_factory=list)  # units sent by an officer: {unit, by, at}
     severity_set: bool = False  # an officer chose the severity (e.g. road fully closed); rules no longer override it
+    # Two-check review of citizen reports (see review.py): "control" = control-room check, "field" = on-ground police
+    # check. Each is {"by", "at", "decision", "note"}. urgent = control room fast-tracked it before the field check.
+    checks: dict[str, dict] = Field(default_factory=dict)
+    urgent: bool = False
 
 
 # ---- API inputs (validated at the model level) ----

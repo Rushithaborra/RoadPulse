@@ -1,0 +1,58 @@
+/* Field police app: one column, large touch targets, readable in daylight */
+.fapp { flex: 1; width: 100%; max-width: 560px; margin: 0 auto; padding: 18px 16px 40px; }
+.hello { margin-bottom: 14px; }
+.hello h2 { font-size: 1.5rem; letter-spacing: -.02em; }
+.hello p { margin: 4px 0 2px; }
+.hello button.link { padding-left: 0; }
+
+.tasks { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.tasks li.task { background: var(--paper); border-radius: var(--r-panel); padding: 16px 16px 14px; border: 1.5px solid var(--lane);
+  cursor: pointer; position: relative; overflow: hidden; }
+.tasks li.task:active { border-color: var(--asphalt); }
+.tasks li.task.urgent { padding-top: 24px; }
+.tasks li.task.urgent::before { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 9px; background: var(--hazard); }
+.task .top { display: flex; gap: 12px; align-items: flex-start; }
+.task .sign { width: 36px; height: 36px; border: 0; box-shadow: none; flex: none; }
+.task .sign svg { width: 19px; height: 19px; }
+.task .what { font-size: 1.12rem; font-weight: 800; line-height: 1.2; }
+.task .road { color: var(--asphalt-2); margin-top: 2px; }
+.task .line { margin-top: 10px; font-size: .9rem; color: var(--asphalt-2); }
+.task .line b { color: var(--asphalt); }
+.task .dist { position: absolute; right: 16px; bottom: 14px; font-weight: 800; }
+.tasks li.none { text-align: left; padding: 26px 18px; background: var(--paper); border-radius: var(--r-panel); color: var(--asphalt-2); }
+.tasks li.none b { display: block; color: var(--asphalt); font-size: 1.05rem; margin-bottom: 4px; }
+
+.done-h { margin: 28px 0 8px; font-size: .9rem; color: var(--asphalt-2); }
+.done { list-style: none; margin: 0; padding: 0; font-size: .9rem; }
+.done li { padding: 8px 0; border-bottom: 1px solid var(--concrete-2); }
+.done li.none { color: var(--asphalt-3); border: 0; }
+
+.back { margin: -4px 0 10px; }
+.t-head { background: var(--paper); border-radius: var(--r-panel) var(--r-panel) 0 0; padding: 18px 16px 14px; border: 1.5px solid var(--lane); border-bottom: 0; position: relative; overflow: hidden; }
+.t-head.urgent { padding-top: 26px; }
+.t-head.urgent::before { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 9px; background: var(--hazard); }
+.t-head h2 { font-size: 1.45rem; }
+.t-head .road { color: var(--asphalt-2); margin-top: 3px; }
+.t-head .tags { display: flex; gap: 5px; margin-top: 10px; flex-wrap: wrap; }
+.minimap { height: 230px; border: 1.5px solid var(--lane); border-top: 0; border-bottom: 0; }
+.nav-row { background: var(--paper); border: 1.5px solid var(--lane); border-top: 0; border-radius: 0 0 var(--r-panel) var(--r-panel); padding: 10px 16px; display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.nav-row .btn { padding: 8px 12px; }
+
+.said { margin: 18px 0 0; }
+.said h3 { margin-bottom: 8px; }
+.said ul { list-style: none; margin: 0; padding: 0; }
+.said li { padding: 10px 12px; background: var(--paper); border-left: 4px solid var(--lane); margin-bottom: 6px; border-radius: 0 var(--r-ctl) var(--r-ctl) 0; font-size: .95rem; }
+.said li.ctrl { border-left-color: var(--asphalt); }
+.said li small { display: block; color: var(--asphalt-3); font-size: .8rem; margin-top: 2px; }
+
+.decide { margin-top: 22px; padding: 18px 16px; background: var(--paper); border-radius: var(--r-panel); border: 1.5px solid var(--asphalt); }
+.decide h3 { font-size: 1.1rem; margin-bottom: 12px; }
+.decide .seg label { flex: 1 1 calc(50% - 6px); padding: 13px 12px; font-size: .95rem; }
+.decide .seg label span { display: block; font-weight: 400; font-size: .78rem; color: var(--asphalt-3); }
+.decide .seg input:checked + label span { color: #c9ccd0; }
+.decide .grp { margin-bottom: 14px; }
+.decide button.big { width: 100%; padding: 16px; font-size: 1.05rem; }
+.decide .or { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+.decide .hint { font-size: .84rem; color: var(--asphalt-3); margin-top: 8px; }
+
+@media (min-width: 700px) { .fapp { padding-top: 28px; } }

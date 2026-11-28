@@ -6,6 +6,8 @@ Usage:
   python simulator/demo.py flood | accident | drain | works
   python simulator/demo.py story          # the 10-step hackathon demo (see docs/DEMO.md), pauses between steps
   python simulator/demo.py story --auto --auto-officer   # unattended: the script also plays the officer
+  python simulator/demo.py checks         # citizen report → control room check → field police check → published
+  python simulator/demo.py checks --urgent  # the control room fast-tracks a real emergency, field confirms after
 Options: --url http://localhost:8000  --device-key KEY  --user officer --password PASS
          --no-sensor   (skip simulated depth when the real ESP32 is connected)
          --auto-officer  (story only: approve and resolve through the officer API instead of the dashboard)
@@ -114,7 +116,8 @@ class Demo:
         r = self.c.post("/api/reports", json={"type": "accident", "lat": lat, "lon": lon, "reporter_id": "tg-demo-2",
                                               "simulated": True})
         print(f"    accident report → {r.json()}")
-        print("    (sustained slow traffic + one public report is not enough to publish: an officer must verify it)")
+        print("    (slow traffic + one public report is not enough to publish: the control room checks it, then field\n"
+              "     police confirm it on the ground; only an URGENT fast-track publishes before the field check)")
 
     def works(self):
         self.pause("Planned works: pipeline digging on a side road for 4 hours")
@@ -195,6 +198,58 @@ class Demo:
         print("\nEverything above that came from the simulator is marked SIMULATED in the UI.")
 
 
+    def checks(self):
+        """The two-check review of a citizen report, played through the real API (both desks)."""
+        a = self.a
+        if not a.field_password and a.auto_officer:
+            raise SystemExit("Add a field account to OFFICER_USERS in .env, e.g. field1:some-password")
+        lat, lon = self.on_road(180, -140) if a.urgent else self.on_road(-150, -75)
+        self.pause("1. A citizen reports a road blockage (SIMULATED report through the public endpoint)")
+        r = self.c.post("/api/reports", json={"type": "blockage", "lat": lat, "lon": lon, "reporter_id": "demo-citizen",
+                                              "note": "tree fallen across the road", "simulated": True}).json()
+        iid = r["incident_id"]
+        print(f"    report {iid} → {r['status']}; public sees it: {self.is_public(iid)}")
+        if r["status"] != "Reported":
+            print("    this spot already has a confirmed incident, so the report simply joined it. Resolve it in /control "
+                  "(or restart the server) to replay the two checks.")
+            return
+        st = self.c.get(f"/api/reports/{iid}/status").json()
+        print(f"    the citizen's tracker says: {st['stage']}")
+
+        if a.urgent:
+            self.pause("2. Control room: this is an emergency → URGENT fast-track (publishes now, field check stays open)")
+            body = {"urgent": True, "severity": "Closed", "reason": "caller says the road is fully blocked"}
+        else:
+            self.pause("2. Control room check (check 1 of 2): plausible → send to field police")
+            body = {"severity": "Closed"}
+        if a.auto_officer:
+            r = self.ok(self.c.post(f"/api/incidents/{iid}/verify", json=body, headers=self.officer()))
+            print(f"    control room → stage {r['review']['stage']}; public sees it: {self.is_public(iid)}")
+        else:
+            print("    do it in /control (log in as the control room, open the report, press the button)")
+
+        self.pause("3. Field police check (check 2 of 2): an officer at the spot confirms it")
+        if a.auto_officer:
+            t = self.ok(self.c.post("/api/auth/login", json={"username": a.field_user, "password": a.field_password}))
+            fh = {"Authorization": f"Bearer {t['token']}"}
+            r = self.ok(self.c.post(f"/api/field/incidents/{iid}/confirm", json={"note": "tree across both lanes"},
+                                    headers=fh))
+            print(f"    field police → stage {r['review']['stage']}, status {r['status']}; public sees it: "
+                  f"{self.is_public(iid)}")
+        else:
+            print("    do it in /field (log in as the field account, open the task, press Confirm)")
+        st = self.c.get(f"/api/reports/{iid}/status").json()
+        print(f"    the citizen's tracker now says: {st['stage']}")
+
+    @staticmethod
+    def ok(resp):
+        if resp.status_code >= 400:
+            raise SystemExit(f"    server said {resp.status_code}: {resp.json().get('detail', resp.text)}")
+        return resp.json()
+
+    def is_public(self, iid):
+        return any(i["id"] == iid for i in self.c.get("/api/incidents").json()["incidents"])
+
     def road_ends(self):
         """The two ends of the road segment the flood-watch point sits on (from the public network API)."""
         hs = self.hs
@@ -241,7 +296,8 @@ class Demo:
 
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument("scenario", choices=["all", "flood", "accident", "drain", "works", "story"])
+    p.add_argument("scenario", choices=["all", "flood", "accident", "drain", "works", "story", "checks"])
+    p.add_argument("--urgent", action="store_true", help="checks: the control room fast-tracks the report as urgent")
     p.add_argument("--auto-officer", action="store_true", help="story: act as the officer through the API")
     p.add_argument("--url", default="http://localhost:8000")
     env = read_env()
@@ -249,6 +305,9 @@ def main():
     p.add_argument("--device-key", default=env.get("DEVICE_KEYS", "").split(",")[0] or None)
     p.add_argument("--user", default=users[0][0].strip() if users else "officer")
     p.add_argument("--password", default=users[0][1].strip() if users else None)
+    field = next((u for u in users if u[0].strip().startswith("field")), None)
+    p.add_argument("--field-user", default=field[0].strip() if field else "field1")
+    p.add_argument("--field-password", default=field[1].strip() if field else None)
     p.add_argument("--auto", action="store_true")
     p.add_argument("--no-sensor", action="store_true")
     p.add_argument("--step", type=float, default=1.5, help="seconds between simulated readings")
@@ -259,6 +318,9 @@ def main():
     if a.scenario == "story":
         d.story()
         return
+    if a.scenario == "checks":
+        d.checks()
+        return
     if a.scenario in ("all", "works"):
         d.works()
     if a.scenario in ("all", "flood"):
@@ -266,7 +328,8 @@ def main():
     if a.scenario in ("all", "accident"):
         d.accident()
     if a.scenario == "all":
-        d.pause("Step 5: in the dashboard, verify the accident and approve the flood diversion")
+        d.pause("Step 5: control room (/control) sends the accident to the field team and approves the flood diversion;\n"
+                "    field police (/field) confirm the accident on the ground")
     if a.scenario in ("all", "drain"):
         d.drain()
     print("\nDone.")

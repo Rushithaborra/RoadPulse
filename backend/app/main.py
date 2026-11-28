@@ -13,9 +13,9 @@ from contextlib import asynccontextmanager
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
-from . import alerts, config, evaluate, forecast, fusion, routing, services
+from . import alerts, config, evaluate, forecast, fusion, review, routing, services
 from .geo import haversine_m
 from .db import Database
 from .models import (CitizenReport, Dispatch, Severity, Incident, PlannedWork, PositionIn, ProbeSample, RainOverride,
@@ -24,7 +24,8 @@ from .models import PlacesIn
 from .roadgraph import RoadGraph
 from .routing import incident_effects, route_alternatives
 from .security import (DEVICE_LIMIT, REPORT_LIMIT, ROUTE_LIMIT, SUBSCRIBE_LIMIT, consume_stream_ticket, issue_stream_ticket,
-                       issue_token, limit, optional_officer, require_device, require_officer)
+                       issue_token, limit, optional_officer, require_device, require_field, require_officer,
+                       require_staff)
 from .store import store
 
 log = logging.getLogger("roadpulse")
@@ -165,14 +166,14 @@ async def request_log(request: Request, call_next):
                  (time.perf_counter() - t0) * 1000)
     resp.headers["X-Request-ID"] = rid
     p = request.url.path
-    if p == "/" or p.startswith("/static/"):
+    if p in ("/", "/control", "/field") or p.startswith("/static/"):
         resp.headers["Cache-Control"] = "no-cache"  # revalidate (ETag) so a redeployed UI is never served stale
     return resp
 
 
 # ---------------------------------------------------------------- serialisation
 
-def incident_view(inc: Incident, detail: bool = False) -> dict:
+def incident_view(inc: Incident, detail: bool = False, staff: bool = False) -> dict:
     ts = now()
     by_source: dict[str, int] = {}
     for s in inc.signals:
@@ -196,6 +197,7 @@ def incident_view(inc: Incident, detail: bool = False) -> dict:
         "simulated": any(s.simulated for s in inc.signals),
         "people_warned": sum(1 for a in store.alert_log if a["incident_id"] == inc.id and a["kind"] != "clear"),
         "road": S.rg.road_name(inc.lat, inc.lon),
+        "review": review.view(inc, staff),
         "affected_segments": [S.rg.edge_geo(u, v) for u, v in
                               S.rg.edges_near(inc.lat, inc.lon, config.INCIDENT_EDGE_RADIUS_M) if str(u) < str(v)],
     }
@@ -257,7 +259,8 @@ def network():
     segs = []
     for u, v, d in S.rg.g.edges(data=True):
         if str(u) < str(v) or not S.rg.g.has_edge(v, u):
-            segs.append({"coords": S.rg.edge_geo(u, v), "speed_kph": d["speed_kph"], "lanes": d["lanes"]})
+            segs.append({"coords": S.rg.edge_geo(u, v), "speed_kph": d["speed_kph"], "lanes": d["lanes"],
+                         "name": d.get("name") or None, "oneway": not S.rg.g.has_edge(v, u)})
     return {"source": S.rg.source, "map_mode": S.rg.mode, "map_warning": S.rg.warning,
             "hotspots_source": store.hotspot_source,
             "center": [config.CENTER_LAT, config.CENTER_LON], "segments": segs}
@@ -275,7 +278,7 @@ def list_incidents(scope: str = Query("public", pattern="^(public|all)$"), inclu
             continue
         if not include_cleared and inc.status == "Cleared":
             continue
-        items.append(incident_view(inc))
+        items.append(incident_view(inc, staff=officer is not None))
     return {"incidents": items}
 
 
@@ -284,7 +287,7 @@ def get_incident(incident_id: str, officer=Depends(optional_officer)):
     inc = _get(incident_id)
     if not officer and not services.is_published(inc, now()):
         raise HTTPException(404, "Incident not found")
-    return incident_view(inc, detail=bool(officer))
+    return incident_view(inc, detail=bool(officer), staff=bool(officer))
 
 
 @app.post("/api/reports", status_code=201)
@@ -311,7 +314,9 @@ def report_status(incident_id: str):
         outcome = "rejected" if (inc.cleared_reason or "").startswith("rejected") else "resolved"
     else:
         outcome = "published" if published else "pending"
-    return {"incident_id": inc.id, "outcome": outcome, "status": inc.status, "published": published}
+    st = review.stage(inc)
+    return {"incident_id": inc.id, "outcome": outcome, "status": inc.status, "published": published,
+            "stage": review.PUBLIC_STAGE[st], "stage_code": st}
 
 
 @app.post("/api/sensors/readings")
@@ -436,8 +441,8 @@ async def snapshot_json(officer: bool) -> str:
 
 
 @app.post("/api/stream/ticket")
-def stream_ticket(officer=Depends(require_officer)):
-    """Exchange the officer's bearer token (sent in a header) for a one-time, 60-second stream ticket."""
+def stream_ticket(officer=Depends(require_staff)):
+    """Exchange a staff (control room or field) bearer token (sent in a header) for a one-time, 60-second stream ticket."""
     return issue_stream_ticket(officer)
 
 
@@ -492,35 +497,47 @@ def login(body: Login, request: Request):
 
 
 def _officer_action(incident_id: str, action: str, officer: dict, reason: str | None = None,
-                    severity: str | None = None) -> dict:
+                    severity: str | None = None, urgent: bool = False) -> dict:
     inc = _get(incident_id)
     who = officer["sub"]
     ts = now()
     with store.lock:
-        if severity and action in ("verify", "respond") and inc.type != "flood":
-            inc.severity, inc.severity_set = severity, True   # a flood's severity comes from measured depth
-        if action == "verify":
-            inc.signals.append(Signal(source="officer", type=inc.type, lat=inc.lat, lon=inc.lon, weight=1.0,
-                                      source_id=who, note=reason))
-            fusion.refresh(store, inc)
-            if inc.status == "Reported":
-                fusion.set_status(store, inc, "Verified", ts, "verified by officer", who)
-            services.reward_reporters(store, inc, True)
-        elif action == "respond":
-            if inc.status == "Cleared":
-                raise HTTPException(409, "Incident already cleared")
-            if inc.status == "Reported":
-                fusion.set_status(store, inc, "Verified", ts, "verified by officer", who)
-            fusion.set_status(store, inc, "Responding", ts, reason or "diversion approved", who)
-        elif action == "clear":
-            fusion.set_status(store, inc, "Cleared", ts, reason or "cleared by officer", who)
-        elif action == "reject":
-            services.reward_reporters(store, inc, False)
-            fusion.set_status(store, inc, "Cleared", ts, reason or "rejected as false report", who)
+        two_check = review.needs_two_checks(inc) and inc.status != "Cleared"
+        if action == "urgent" or (action == "verify" and two_check and urgent):
+            review.control_urgent(store, inc, who, reason, severity)
+            action = "urgent"
+        elif action == "verify" and two_check:
+            # citizen report: the control room is check 1 of 2; it goes to field police, nothing is published yet
+            review.control_forward(store, inc, who, reason, severity)
+            action = "forward"
+        else:
+            if severity and action in ("verify", "respond") and inc.type != "flood":
+                inc.severity, inc.severity_set = severity, True   # a flood's severity comes from measured depth
+            if action == "verify":
+                inc.signals.append(Signal(source="officer", type=inc.type, lat=inc.lat, lon=inc.lon, weight=1.0,
+                                          source_id=who, note=reason))
+                fusion.refresh(store, inc)
+                if inc.status == "Reported":
+                    fusion.set_status(store, inc, "Verified", ts, "verified by officer", who)
+                services.reward_reporters(store, inc, True)
+            elif action == "respond":
+                if inc.status == "Cleared":
+                    raise HTTPException(409, "Incident already cleared")
+                if two_check and not services.is_published(inc, ts):
+                    raise HTTPException(409, "This citizen report is not confirmed yet: it needs the field police check "
+                                             "(or mark it urgent) before a diversion can be approved")
+                if inc.status == "Reported":
+                    fusion.set_status(store, inc, "Verified", ts, "verified by officer", who)
+                fusion.set_status(store, inc, "Responding", ts, reason or "diversion approved", who)
+            elif action == "clear":
+                fusion.set_status(store, inc, "Cleared", ts, reason or "cleared by officer", who)
+            elif action == "reject":
+                services.reward_reporters(store, inc, False)
+                fusion.set_status(store, inc, "Cleared", ts, reason or "rejected as false report", who)
         inc.updated = ts
-    S.db.audit(ts, who, f"incident_{action}", inc.id, {"reason": reason})
+    S.db.audit(ts, who, f"incident_{action}", inc.id, {"reason": reason, "urgent": urgent})
     _changed(inc)
-    return incident_view(inc)
+    return incident_view(inc, staff=True)
 
 
 # ---------------------------------------------------------------- dispatch (officer)
@@ -543,15 +560,49 @@ def dispatch(incident_id: str, body: Dispatch, officer=Depends(require_officer))
 
 
 class ActionBody(BaseModel):
-    reason: str | None = None
+    reason: str | None = Field(default=None, max_length=200)
     severity: Severity | None = None   # verify / respond: the officer decides, e.g. "Closed" for a fully blocked road
+    urgent: bool = False               # verify a citizen report as a real emergency: publish before the field check
 
 
 @app.post("/api/incidents/{incident_id}/{action}")
 def incident_action(incident_id: str, action: str, body: ActionBody | None = None, officer=Depends(require_officer)):
-    if action not in ("verify", "respond", "clear", "reject"):
+    if action not in ("verify", "urgent", "respond", "clear", "reject"):
         raise HTTPException(404, "Unknown action")
-    return _officer_action(incident_id, action, officer, body.reason if body else None, body.severity if body else None)
+    b = body or ActionBody()
+    return _officer_action(incident_id, action, officer, b.reason, b.severity, b.urgent)
+
+
+# ---------------------------------------------------------------- field police (check 2 of 2)
+
+class FieldBody(BaseModel):
+    note: str | None = Field(default=None, max_length=200)
+    severity: Severity | None = None   # what the officer sees on the ground (not for floods: depth decides)
+
+
+@app.get("/api/field/tasks")
+def field_tasks(officer=Depends(require_field)):
+    """Reports the control room has sent to the field team, urgent ones first, then oldest first."""
+    rank = {"urgent_awaiting_field": 0, "field_disputed": 1, "with_field": 2}
+    items = [i for i in store.snapshot() if review.stage(i) in rank]
+    items.sort(key=lambda i: (rank[review.stage(i)], i.checks.get("control", {}).get("at", i.created)))
+    return {"tasks": [incident_view(i, detail=True, staff=True) for i in items]}
+
+
+@app.post("/api/field/incidents/{incident_id}/{decision}")
+def field_decision(incident_id: str, decision: str, body: FieldBody | None = None, officer=Depends(require_field)):
+    if decision not in ("confirm", "not-found"):
+        raise HTTPException(404, "Unknown decision")
+    b = body or FieldBody()
+    inc = _get(incident_id)
+    with store.lock:
+        if decision == "confirm":
+            review.field_confirm(store, inc, officer["sub"], b.note, b.severity)
+        else:
+            review.field_not_found(store, inc, officer["sub"], b.note)
+    S.db.audit(now(), officer["sub"], f"field_{decision.replace('-', '_')}", inc.id, {"note": b.note})
+    _changed(inc)
+    return incident_view(inc, staff=True)
 
 
 @app.post("/api/planned-works", status_code=201)
@@ -750,6 +801,16 @@ def favicon():
 @app.get("/")
 def index():
     return FileResponse(os.path.join(STATIC_DIR, "index.html"))
+
+
+@app.get("/control", include_in_schema=False)
+def control_page():
+    return FileResponse(os.path.join(STATIC_DIR, "control.html"))
+
+
+@app.get("/field", include_in_schema=False)
+def field_page():
+    return FileResponse(os.path.join(STATIC_DIR, "field.html"))
 
 
 @app.get("/commute", include_in_schema=False)

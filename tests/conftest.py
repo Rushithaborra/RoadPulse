@@ -3,7 +3,7 @@ import sys
 
 # configure before the app is imported (importing the app opens no database; the connection is made in its lifespan)
 os.environ.setdefault("CLEAR_WINDOW_S", "0")
-os.environ.setdefault("OFFICER_USERS", "officer:test-pass")
+os.environ.setdefault("OFFICER_USERS", "officer:test-pass,field1:field-pass")
 os.environ.setdefault("DEVICE_KEYS", "test-key")
 os.environ.setdefault("REPORT_RATE_PER_MIN", "600")
 os.environ.setdefault("ROADPULSE_SECRET", "test-secret")
@@ -38,3 +38,26 @@ def officer_headers(client):
 
 
 DEV = {"X-Device-Key": "test-key"}
+
+
+@pytest.fixture()
+def field_headers(client):
+    """Traffic police on the ground (role "field"): the second of the two checks on a citizen report."""
+    t = client.post("/api/auth/login", json={"username": "field1", "password": "field-pass"}).json()["token"]
+    return {"Authorization": f"Bearer {t}"}
+
+
+def field_login(client):
+    t = client.post("/api/auth/login", json={"username": "field1", "password": "field-pass"}).json()["token"]
+    return {"Authorization": f"Bearer {t}"}
+
+
+def two_checks(client, officer_headers, iid, severity=None):
+    """Control room check, then field police confirmation: the only non-urgent way a citizen report is published."""
+    body = {"severity": severity} if severity else {}
+    r = client.post(f"/api/incidents/{iid}/verify", json=body, headers=officer_headers)
+    assert r.status_code == 200, r.text
+    assert r.json()["published"] is False and r.json()["review"]["stage"] == "with_field"
+    r = client.post(f"/api/field/incidents/{iid}/confirm", json=body, headers=field_login(client))
+    assert r.status_code == 200, r.text
+    return r.json()

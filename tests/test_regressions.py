@@ -2,7 +2,7 @@
 import math
 import time
 
-from conftest import DEV
+from conftest import DEV, field_login
 
 
 def centre(client):
@@ -56,7 +56,10 @@ def test_sensor_incident_still_verifies(client):
 def test_officer_verification_publishes_report(client, officer_headers):
     lat, lon = moved(*centre(client), -150, -75)
     r = client.post("/api/reports", json={"type": "accident", "lat": lat, "lon": lon}).json()
-    v = client.post(f"/api/incidents/{r['incident_id']}/verify", headers=officer_headers, json={}).json()
+    c = client.post(f"/api/incidents/{r['incident_id']}/verify", headers=officer_headers, json={}).json()
+    assert c["status"] == "Reported" and c["published"] is False, "check 1 of 2 (control room) does not publish"
+    assert client.get("/api/incidents").json()["incidents"] == []
+    v = client.post(f"/api/field/incidents/{r['incident_id']}/confirm", headers=field_login(client), json={}).json()
     assert v["status"] == "Verified" and v["published"] is True
     assert [i["id"] for i in client.get("/api/incidents").json()["incidents"]] == [r["incident_id"]]
     # and it now affects routing

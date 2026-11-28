@@ -10,57 +10,78 @@ Hackathon prototype (AITAM virtual hackathon, Problem #3). Demo area: Dwaraka Na
 Road data and map tiles © [OpenStreetMap contributors](https://www.openstreetmap.org/copyright), available under the
 Open Database Licence (ODbL). The attribution is shown on the map and must stay visible.
 
-## Run it (2 minutes)
+## Run it in VS Code (5 minutes the first time)
 
-There is one server: it serves the API and the web interface (plain HTML/JS, no build step), so there is no separate
-frontend command. Python 3.12 or newer.
+Needs **Python 3.12 or newer** and **VS Code** with the Python extension (VS Code offers it when you open the folder).
+There is one server: it serves the API and all three web apps (plain HTML/JS, no build step, no Node.js).
 
-**Windows (PowerShell)**
-```powershell
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1         # the leading .\ is required; if blocked: Set-ExecutionPolicy -Scope Process Bypass
-pip install -r requirements-dev.txt
-Copy-Item .env.example .env          # then edit the passwords and keys in .env
-uvicorn app.main:app --app-dir backend --env-file .env --no-access-log --timeout-graceful-shutdown 3
-```
+1. **Open the folder:** VS Code > *File > Open Folder…* > choose the `RoadPulse` folder (the one with `README.md`).
+2. **Open a terminal:** *Terminal > New Terminal* (PowerShell on Windows).
+3. **Create the virtual environment and install** (first time only):
 
-**macOS / Linux**
-```bash
-python -m venv .venv && source .venv/bin/activate
-pip install -r requirements-dev.txt
-cp .env.example .env                 # then edit the passwords and keys
-uvicorn app.main:app --app-dir backend --env-file .env --no-access-log --timeout-graceful-shutdown 3
-```
-Open http://localhost:8000. Officer login uses `OFFICER_USERS` from `.env` (the example file has `change-me`
-placeholders: change them before sharing the server). If `OFFICER_USERS` or `DEVICE_KEYS` is missing, the server
-generates random ones for that run and prints them in its log.
+   Windows (PowerShell):
+   ```powershell
+   python -m venv .venv
+   .\.venv\Scripts\Activate.ps1      # if blocked: Set-ExecutionPolicy -Scope Process Bypass, then run it again
+   pip install -r requirements-dev.txt
+   Copy-Item .env.example .env
+   ```
+   macOS / Linux:
+   ```bash
+   python3 -m venv .venv && source .venv/bin/activate
+   pip install -r requirements-dev.txt
+   cp .env.example .env
+   ```
+4. **Pick the interpreter:** press `Ctrl+Shift+P` > *Python: Select Interpreter* > choose the one in `.venv`.
+5. **Start the server:** *Terminal > Run Task… > RoadPulse: start server* (or press `Ctrl+Shift+B`), or type:
+   ```
+   uvicorn app.main:app --app-dir backend --env-file .env --no-access-log --timeout-graceful-shutdown 3
+   ```
+   Wait for `Uvicorn running on http://127.0.0.1:8000`. To debug instead, press `F5` (*RoadPulse server (debug)*).
+6. **Open the apps** in your browser:
 
-With Docker: `cp .env.example .env && docker compose up --build`
+   | App | Address | Sign in (example `.env`) |
+   |---|---|---|
+   | Commuter map | http://localhost:8000 | none |
+   | Control room | http://localhost:8000/control | `officer` / `change-me` |
+   | Field police (phone layout) | http://localhost:8000/field | `field1` / `change-me-field` |
 
-If the page ever looks out of date after an update, hard-reload it (Ctrl+Shift+R); the server asks browsers to
-revalidate, so this is only needed once.
+7. **Run the demo** in a second terminal (`+` in the terminal panel, activate `.venv` again):
+   `python simulator/demo.py story` (flood story, press Enter between steps), or
+   `python simulator/demo.py checks` (two checks on a citizen report). Also available under *Run Task…*.
+8. **Run the tests:** *Run Task… > RoadPulse: run tests*, or `python -m pytest -q tests`, or the Testing panel.
 
-## What the interface shows
+Stop the server with `Ctrl+C` in its terminal. Change the passwords in `.env` before sharing the server. Names in
+`OFFICER_USERS` that start with `field` are field police; all others are control room (`supervisor…` can do both).
+If `OFFICER_USERS` or `DEVICE_KEYS` is missing, the server generates random ones for that run and prints them.
+To open the field app on a phone on the same Wi-Fi, start the server with `--host 0.0.0.0` and open
+`http://<your-laptop-ip>:8000/field`.
 
-- **Map:** real OpenStreetMap roads of the pilot area (Dwaraka Nagar and the RTC Complex / Dwaraka Bus Station, both
-  inside the loaded map; "Jump to" buttons and labels mark them). A collapsible **Map legend** explains every colour
-  and symbol. If `data/area.graphml` is missing or cannot be loaded, the server falls back to a synthetic grid and
-  the page shows a red **MAP WARNING** banner and a "SYNTHETIC grid: not real roads" badge; it is never silent
-  (`/api/health` and `/api/network` carry `map_warning`).
-- **Commuter:** click A then B for a route that follows real roads; verified incidents colour the affected roads by
-  severity, roads blocked for your chosen vehicle get a black dotted overlay, and the route changes live when an
-  incident is verified, changes or is resolved. Only verified incidents are shown or used.
-- **Report a problem:** choose the type, describe it, pick the location on the map, send. A public report is never
-  published on its own: it appears under "your reports" as *waiting for officer review* and turns into *verified*,
-  *not confirmed* or *resolved* as an officer acts (the page asks `GET /api/reports/{id}/status`, which exposes only
-  that outcome).
-- **Traffic authority:** log in, see reports *pending review* and *active* incidents, open **Evidence** (type, road,
-  location, severity, confidence, status timeline and every signal with its source and a SIMULATED badge), then
-  **Verify**, **Reject**, **Approve diversion** or **Resolve**; what-if, signal advice and a bulletin draft are
-  advice only, RoadPulse controls no signal.
-- **Connection:** the header shows `live · updated Ns ago`. The server sends a heartbeat every ~10 s; if the stream
-  drops or goes quiet, a banner says the information may be out of date and the page reconnects by itself.
-- Per-vehicle water-depth limits are **assumed demo values** in `backend/app/config.py`, not safety guidance.
+With Docker instead: `cp .env.example .env && docker compose up --build`
+
+## The three apps
+
+- **Commuter map (`/`).** Real OpenStreetMap roads of the pilot area with Dwaraka Nagar and the RTC Complex marked.
+  Choose a vehicle, tap a start and a destination: the route follows real roads and avoids confirmed disruptions;
+  when a disruption is confirmed, changes or clears, the route redraws by itself. Affected roads are coloured by
+  severity; a closed road is drawn with black and yellow barrier striping; a road blocked for your vehicle gets a
+  white dotted line. A **Map legend** explains every colour and symbol. **Report a problem** sends a report and
+  tracks it through four steps (reported, control room, field police, on the map).
+- **Control room (`/control`).** Queues: *Needs your check*, *With field police*, *Live on the public map*, flood
+  watch and activity. For a citizen report: **Send to field police**, **Urgent: publish now** or **Reject**. For a
+  published incident: **Approve diversion**, **Resolve**, record units sent, and decision support (compare
+  diversions, signal timing advice, bulletin draft; advice only, RoadPulse controls no signal). Also planned works,
+  the demo rain setting and the before/after evaluation.
+- **Field police (`/field`).** Built for a phone. The checks the control room sent, urgent first, each with the
+  citizen's words, the control room's note, a map and a Directions link. **Confirm: it is here** (with how bad it
+  is) publishes it; **Not found at this spot** closes it, or sends an urgent one back to the control room.
+
+All three share one live connection type (Server-Sent Events with a heartbeat): the header shows **Live**, and a
+banner says when updates stop; pages reconnect by themselves. If `data/area.graphml` cannot be loaded the server
+falls back to a synthetic grid and every app says so (*Synthetic grid, not real roads* and a red map warning).
+Per-vehicle water-depth limits are **assumed demo values** in `backend/app/config.py`, not safety guidance.
+Map tiles are greyscale so that only RoadPulse information carries colour. Fonts (Overpass, OFL licence) and Leaflet
+are bundled, so the apps work without a CDN; only the background map tiles need internet.
 
 ## Alert delivery (commuters, boards, Telegram)
 
@@ -80,18 +101,11 @@ python simulator/demo.py all                 # the original scenario with an acc
 python simulator/demo.py all --auto          # no pauses
 python simulator/demo.py all --no-sensor     # when the real ESP32 is connected
 ```
-1. Commuter view: pick **Two-wheeler**, click a start on the road on one side of *Demo hotspot A* (the circle on
-   the map) and a destination on the other side, on the same road. On the shipped Dwaraka Nagar map the hotspot is on
-   *4 th Lane Dwaraka nagar*: the direct 106 m ride becomes a 299 m or 362 m diversion (depending on direction) once
-   the water passes 10 cm.
-2. Run the scenario: rain is set, water rises, the sensor incident is verified, the bike route changes live.
-   Switch the vehicle to **Bus**: the bus is still allowed through at 35 cm.
-3. Authority view: log in. The accident (speed drop + one public report) is **pending**: verify it, then approve the
-   flood diversion, run **What-if** / **Signals** / **Bulletin**, then **Before / after evaluation**.
-4. Drain step: the incident auto-clears after `CLEAR_WINDOW_S` (120 s by default).
+Also: `python simulator/demo.py checks` (a citizen report through both checks) and `checks --urgent` (the control
+room's fast-track). With `--auto --auto-officer` the script plays the control room and field police itself.
 
 **Honesty rules for the demo:** the simulator marks everything it sends as `simulated`, and the UI shows a dashed
-**SIMULATED** badge on those incidents, hotspot readings and planned works; the rain override is labelled
+**Simulated** badge on those incidents, hotspot readings and planned works; the rain override is labelled
 "manual override set by an officer, not a forecast". Say this out loud during the demo. The evaluation uses a simplified
 traffic model (static assignment with a BPR delay curve), not SUMO, and its numbers are model outputs, not field data.
 Telugu text is template-based and should be checked by a native speaker.
@@ -100,14 +114,19 @@ Telugu text is template-based and should be checked by a native speaker.
 
 | Evidence | Effect |
 |---|---|
-| Public reports (web, Telegram) | Shown to officers as **pending**. Any number of reports counts as **one untrusted source** (reporter ids are client-supplied, so they prove nothing). Never auto-verified. |
-| Keyed water sensor (`X-Device-Key`) | Trusted. Two consecutive readings ≥ 10 cm open an incident; confidence 0.8 verifies it. |
-| Keyed fleet speed probes | **Not trusted**, weight 0.4. Judged per road link from 8+ vehicles against this road's normal speed for this time, ignoring junction zones, and the dip must last 3 minutes (`probe_rules.py`). It raises a *Suspected slowdown* for officers and never publishes on its own (0.4 + report 0.35 = 0.61 stays pending). |
-| Planned works (officer) | Trusted; active during its time window. |
-| Officer **Verify** | Always verifies and publishes. |
+| Public reports (web, Telegram) | Never publish on their own. Any number of reports counts as **one untrusted source** (reporter ids are client-supplied). They need **two checks**: the control room, then field police at the spot. |
+| Control room check | Sends the report to field police (not published), rejects it, or marks it **urgent**: published at once, field check still requested. |
+| Field police check | Confirms it (published, routes change) or *not found* (closed; an urgent one goes back to the control room). |
+| Keyed water sensor (`X-Device-Key`) | Trusted. Two consecutive readings ≥ 10 cm open an incident; confidence 0.8 verifies it. One control-room decision is enough for sensor-backed incidents. |
+| Keyed fleet speed probes | **Not trusted**, weight 0.4. Judged per road link from 8+ vehicles against this road's normal speed for this time, ignoring junction zones, and the dip must last 3 minutes (`probe_rules.py`). It raises a *Suspected slowdown* and never publishes on its own; without trusted evidence it follows the two-check route. |
+| Planned works (control room) | Trusted; active during its time window. |
 
-Commuters and routing only use **Verified** or **Responding** incidents. Confidence is still computed and shown to
-officers for every incident.
+Commuters and routing only use **Verified** or **Responding** incidents. The review stage is in every incident
+(`review.stage`: `control_review`, `with_field`, `urgent_awaiting_field`, `field_disputed`, `confirmed`,
+`trusted_evidence`, `rejected`, `closed`); the logic is in `backend/app/review.py`. Field endpoints:
+`GET /api/field/tasks`, `POST /api/field/incidents/{id}/confirm` and `/not-found` (role *field*). Control-room
+endpoints refuse field accounts with HTTP 403 and the other way round. A citizen can follow a report with
+`GET /api/reports/{id}/status`, which returns only the outcome and stage, never evidence or names.
 
 ## Map: real Visakhapatnam roads or synthetic grid
 
@@ -144,10 +163,12 @@ HTTP 422. Because one-way streets are kept, some pairs of points have no legal r
 | `backend/app/db.py`, `security.py` | SQLite persistence, auth, device keys, rate limits | B |
 | `backend/app/forecast.py`, `config.py` | rain forecast, flood countdown, hotspots | B / A |
 | `backend/app/roadgraph.py`, `routing.py`, `evaluate.py` | road graph, vehicle-aware routing, what-if, signals | C |
-| `backend/static/` | commuter + authority UI (Leaflet, no build step) | D |
+| `backend/app/review.py` | two-check review of citizen reports (control room, field police, urgent) | B |
+| `backend/static/` | commuter map (`index.html`, `app.js`), control room (`control.html`), field app (`field.html`); shared `rp/core.js` and `rp/theme.css` (Leaflet, no build step) | D |
+| `.vscode/` | VS Code tasks (start server, tests, demos) and debug launch | |
 | `bot/telegram_bot.py` | citizen reports via Telegram | D |
 | `firmware/esp32_water_sensor/` | ESP32 + JSN-SR04T depth sensor | A |
-| `simulator/demo.py` | demo scenario through the real API | C |
+| `simulator/demo.py` | demo scenarios through the real API (`story`, `checks`, `all`) | C |
 | `tools/fetch_map.py` | export a real OpenStreetMap area | C |
 | `tools/loadtest.py` | load test of critical workflows | B |
 | `docs/` | plan, API contract, incident schema | coordinator |
@@ -226,7 +247,8 @@ Each incident keeps at most 120 evidence signals (latest plus strongest per sour
 
 ## Known limitations
 - Single process (in-memory working state + SQLite); run one server instance only.
-- Report-only incidents never auto-verify, by design; an officer must verify them.
+- Report-only incidents never auto-verify, by design: they need the control room and field police (or an urgent
+  fast-track by the control room).
 - Forecast needs internet. After a failure the API is not retried for 2 minutes; the last good forecast is used for
   up to 3 hours, then the countdown shows "no forecast available". Use the rain override offline.
 - Officer accounts are configured in `.env`; there is no user-management screen.
@@ -240,7 +262,9 @@ Each incident keeps at most 120 evidence signals (latest plus strongest per sour
   incident; the officer's Evidence panel shows the real road and location.
 - The officer session token is signed with `ROADPULSE_SECRET`; if that is not set, a random one is generated per run and
   officers must log in again after a restart.
-- Browser checks were done in the Chromium-based Browser pane (desktop and 375 px phone width), not on a real phone or
-  in other browsers. Map tiles need internet; the road graph and routing do not.
+- Browser checks were automated in headless Chromium (Playwright): desktop 1440 px and phone 390 px, plus an
+  end-to-end run with three separate browsers (citizen, control room, field police). Not yet checked on a real phone
+  or in Firefox/Safari. Map tiles need internet; the road graph and routing do not.
+- The field app does not assign checks to a particular officer: every field account sees every forwarded report.
 - MVP is frozen: no new features without the coordinator's approval. The phase 6 changes (UI, legend, report tracking,
   heartbeat, map warning, `story` scenario) were explicitly approved.

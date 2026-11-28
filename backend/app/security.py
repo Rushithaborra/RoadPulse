@@ -35,14 +35,28 @@ for _var in ("OFFICER_USERS", "DEVICE_KEYS", "ROADPULSE_SECRET"):
 TRUST_PROXY = os.getenv("TRUST_PROXY", "0") == "1"
 
 
-# username -> (password, role). Set OFFICER_USERS="officer1:pass1,supervisor:pass2" in .env.
+# Roles come from the username prefix: "supervisor..." and anything else = control room; "field..." = traffic police
+# on the ground (field app). Field accounts cannot take control-room decisions and vice versa.
+CONTROL_ROLES = ("officer", "supervisor")
+FIELD_ROLES = ("field",)
+
+
+def role_for(username: str) -> str:
+    if username.startswith("supervisor"):
+        return "supervisor"
+    if username.startswith("field"):
+        return "field"
+    return "officer"
+
+
+# username -> (password, role). Set OFFICER_USERS="officer1:pass1,supervisor:pass2,field1:pass3" in .env.
 def _users() -> dict[str, tuple[str, str]]:
     raw = os.environ["OFFICER_USERS"]
     out = {}
     for pair in raw.split(","):
         if ":" in pair:
             u, p = pair.split(":", 1)
-            out[u.strip()] = (p.strip(), "supervisor" if u.strip().startswith("supervisor") else "officer")
+            out[u.strip()] = (p.strip(), role_for(u.strip()))
     return out
 
 
@@ -79,13 +93,30 @@ def verify_token(token: str) -> dict | None:
         return None
 
 
-def require_officer(authorization: str | None = Header(default=None)) -> dict:
+def _claims(authorization: str | None, roles: tuple, wrong_role: str) -> dict:
     if not authorization or not authorization.lower().startswith("bearer "):
         raise HTTPException(401, "Officer login required")
     claims = verify_token(authorization.split(" ", 1)[1])
-    if not claims or claims.get("role") not in ("officer", "supervisor"):
+    if not claims:
         raise HTTPException(401, "Invalid or expired token")
+    if claims.get("role") not in roles:
+        raise HTTPException(403, wrong_role)   # logged in, but this is not your desk
     return claims
+
+
+def require_officer(authorization: str | None = Header(default=None)) -> dict:
+    """Control room (officer or supervisor)."""
+    return _claims(authorization, CONTROL_ROLES, "This action is for the traffic control room")
+
+
+def require_field(authorization: str | None = Header(default=None)) -> dict:
+    """Traffic police on the ground (supervisors may also act as field)."""
+    return _claims(authorization, FIELD_ROLES + ("supervisor",), "This action is for field police")
+
+
+def require_staff(authorization: str | None = Header(default=None)) -> dict:
+    """Any logged-in staff account (control room or field)."""
+    return _claims(authorization, CONTROL_ROLES + FIELD_ROLES, "Staff login required")
 
 
 def optional_officer(authorization: str | None = Header(default=None)) -> dict | None:

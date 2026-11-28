@@ -3,7 +3,7 @@ must be able to see what happened to their report without that report being publ
 import os
 
 import pytest
-from conftest import DEV
+from conftest import DEV, field_login
 
 from app import config
 
@@ -61,10 +61,15 @@ def test_report_status_follows_the_report_without_publishing_it(client, officer_
 
     st = client.get(f"/api/reports/{iid}/status").json()
     assert st["outcome"] == "pending" and st["published"] is False
-    assert set(st) == {"incident_id", "outcome", "status", "published"}, "no location or evidence is exposed"
+    assert set(st) == {"incident_id", "outcome", "status", "published", "stage",
+                       "stage_code"}, "no location or evidence is exposed"
+    assert st["stage"] == "With the traffic control room"
     assert all(i["id"] != iid for i in client.get("/api/incidents").json()["incidents"]), "still not public"
 
     client.post(f"/api/incidents/{iid}/verify", headers=officer_headers)
+    st = client.get(f"/api/reports/{iid}/status").json()
+    assert st["outcome"] == "pending" and st["stage"] == "Sent to traffic police on the ground"
+    client.post(f"/api/field/incidents/{iid}/confirm", headers=field_login(client))
     assert client.get(f"/api/reports/{iid}/status").json()["outcome"] == "published"
 
     client.post(f"/api/incidents/{iid}/clear", headers=officer_headers)

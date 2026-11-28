@@ -138,11 +138,13 @@ class Story:
         print(f"    report → status {r['status']}, confidence {r['confidence']}, public incidents: "
               f"{len(c.get('/api/incidents').json()['incidents'])}")
 
-        self.step("4. The control room verifies it and decides the road is CLOSED (a human decision), then sends help.")
-        c.post(f"/api/incidents/{iid}/verify", json={"severity": "Closed"}, headers=self.off).raise_for_status()
+        self.step("4. The control room fast-tracks it as URGENT (injured rider), road CLOSED, and sends help.\n"
+                  "   Urgent publishes before the field police check; the field team is still asked to confirm it.")
+        c.post(f"/api/incidents/{iid}/verify", json={"severity": "Closed", "urgent": True},
+               headers=self.off).raise_for_status()
         for unit in ("police", "ambulance", "tow"):
             c.post(f"/api/incidents/{iid}/dispatch", json={"unit": unit}, headers=self.off).raise_for_status()
-        print("    verified, severity Closed; police, ambulance and tow recorded as dispatched")
+        print("    published as URGENT, severity Closed; police, ambulance and tow recorded as dispatched")
         self.show("Ravi, still at home", rav, hr, seen_r)
 
         self.step("5. Lakshmi drives her usual route; positions arrive every 40 m. She is warned before the turn-off.")

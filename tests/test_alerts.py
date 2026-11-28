@@ -6,7 +6,7 @@ import time
 
 import pytest
 
-from conftest import DEV
+from conftest import DEV, field_login, two_checks
 
 TOKEN = "X-Subscriber-Token"
 
@@ -64,8 +64,7 @@ def publish_accident(client, officer_headers, a="n0_0", b="n0_1", severity="Clos
     lat, lon = mid(a, b)
     rep = client.post("/api/reports", json={"type": "accident", "lat": lat, "lon": lon, "reporter_id": "c1"}).json()
     iid = rep["incident_id"]
-    r = client.post(f"/api/incidents/{iid}/verify", json={"severity": severity}, headers=officer_headers)
-    assert r.status_code == 200
+    two_checks(client, officer_headers, iid, severity)
     assert client.get("/api/incidents").json()["incidents"], "verified incident must be public"
     return iid
 
@@ -177,6 +176,8 @@ class TestWhoUpdates:
         iid = incidents_all(client, officer_headers)[0]["id"]
         assert client.post(f"/api/incidents/{iid}/verify").status_code == 401  # anonymous cannot
         assert client.post(f"/api/incidents/{iid}/verify", headers=officer_headers).status_code == 200
+        assert client.get("/api/incidents").json()["incidents"] == [], "control room alone does not publish"
+        assert client.post(f"/api/field/incidents/{iid}/confirm", headers=field_login(client)).status_code == 200
         assert len(client.get("/api/incidents").json()["incidents"]) == 1
 
     def test_construction_is_scheduled_by_the_agency_not_detected(self, client, officer_headers):

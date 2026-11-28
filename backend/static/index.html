@@ -3,159 +3,104 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>RoadPulse — live road conditions</title>
+  <title>RoadPulse · Dwaraka Nagar, Visakhapatnam</title>
+  <meta name="description" content="Live road disruptions and safe routes around Dwaraka Nagar, Visakhapatnam.">
   <link rel="stylesheet" href="/static/vendor/leaflet/leaflet.css">
-  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/rp/theme.css">
+  <link rel="stylesheet" href="/static/rp/commuter.css">
 </head>
 <body>
-  <header class="topbar">
-    <div class="brand">
-      <span class="logo" aria-hidden="true"></span>
-      <div><b>RoadPulse</b><small>Road disruptions and safe routes · Visakhapatnam pilot, Dwaraka Nagar</small></div>
-    </div>
-    <nav class="tabs" role="tablist" aria-label="View">
-      <button class="tab active" role="tab" aria-selected="true" data-view="commuter">Commuter</button>
-      <button class="tab" role="tab" aria-selected="false" data-view="authority">Traffic authority</button>
-    </nav>
-    <div class="status">
-      <span id="mapmode" class="chip hidden"></span>
-      <span id="conn" class="chip">connecting…</span>
-    </div>
+  <header class="bar">
+    <a class="mark" href="/" aria-label="RoadPulse home"><i></i><b>RoadPulse</b></a>
+    <span class="place">Dwaraka Nagar, Visakhapatnam</span>
+    <span class="spacer"></span>
+    <span id="mapmode" class="mapmode" hidden></span>
+    <span id="conn" class="conn">Connecting</span>
   </header>
-  <div id="banner" class="banner hidden" role="alert"></div>
+  <div id="banner" class="banner" hidden></div>
 
-  <main>
-    <div class="mapwrap">
-      <div id="map" aria-label="Road map"></div>
-      <div id="map-overlay" class="map-overlay">Loading road network…</div>
-    </div>
+  <main class="shell">
+    <aside class="panel">
+      <div class="tabs" role="tablist">
+        <button role="tab" id="tab-btn-route" aria-selected="true" aria-controls="tab-route">Plan a route</button>
+        <button role="tab" id="tab-btn-report" aria-selected="false" aria-controls="tab-report">Report a problem <span id="mine-count" class="count" hidden></span></button>
+      </div>
 
-    <aside id="panel">
-      <!-- COMMUTER -->
-      <section id="view-commuter" class="view">
-        <div class="block">
-          <h2>Plan a route</h2>
-          <div class="od">
-            <div class="od-row"><span class="pin a">A</span><span id="od-start" class="od-text muted">Click the map to set your start</span></div>
-            <div class="od-row"><span class="pin b">B</span><span id="od-end" class="od-text muted">Then click your destination</span></div>
+      <section id="tab-route" class="tabpane" role="tabpanel" aria-labelledby="tab-btn-route">
+        <h2>Where are you going?</h2>
+        <p class="lead">Tap the map for your start, then your destination, inside the dashed outline (the pilot area). Routes follow the real roads and avoid every disruption that police or sensors have confirmed.</p>
+
+        <div class="group">
+          <span class="field-label" id="veh-label">I am travelling by</span>
+          <div class="seg" role="radiogroup" aria-labelledby="veh-label" id="vehicle">
+            <input type="radio" name="veh" id="v-two_wheeler" value="two_wheeler" checked><label for="v-two_wheeler">Two-wheeler</label>
+            <input type="radio" name="veh" id="v-auto" value="auto"><label for="v-auto">Auto</label>
+            <input type="radio" name="veh" id="v-car" value="car"><label for="v-car">Car</label>
+            <input type="radio" name="veh" id="v-bus" value="bus"><label for="v-bus">Bus</label>
+            <input type="radio" name="veh" id="v-ambulance" value="ambulance"><label for="v-ambulance">Ambulance</label>
           </div>
-          <label for="vehicle">Vehicle
-            <select id="vehicle">
-              <option value="two_wheeler">Two-wheeler</option>
-              <option value="auto">Auto-rickshaw</option>
-              <option value="car" selected>Car</option>
-              <option value="bus">Bus</option>
-              <option value="ambulance">Ambulance</option>
-            </select>
-          </label>
-          <div class="row">
-            <button id="btn-reroute" disabled>Recalculate</button>
-            <button id="btn-clear-route" class="ghost">Reset</button>
-          </div>
-          <div id="route-result" aria-live="polite"></div>
-          <div class="row goto" id="goto"></div>
         </div>
 
-        <div class="block">
-          <h2>Live alerts <span class="count" id="alert-count"></span></h2>
-          <ul id="public-incidents" class="list"></ul>
-          <p class="hint">Only verified disruptions are shown and used for routing. The per-vehicle water-depth limits are assumed demo values, not safety guidance.</p>
+        <ol class="od">
+          <li><span class="pin a"><b>A</b></span><div><b>Start</b><span id="od-start" class="muted">Tap the map</span></div></li>
+          <li><span class="pin b"><b>B</b></span><div><b>Destination</b><span id="od-end" class="muted">Then tap where you are going</span></div></li>
+        </ol>
+        <div class="od-actions">
+          <button id="btn-clear-route" class="link" disabled>Clear route</button>
         </div>
 
-        <div class="block">
-          <h2>Flood watch</h2>
-          <ul id="public-hotspots" class="list"></ul>
-        </div>
+        <div id="route-result" aria-live="polite"></div>
 
-        <div class="block">
-          <h2>Report a problem</h2>
-          <label for="report-type">What did you see?
-            <select id="report-type">
-              <option value="flood">Waterlogging</option>
-              <option value="accident">Accident</option>
-              <option value="blockage">Road blocked</option>
-              <option value="construction">Construction</option>
-            </select>
-          </label>
-          <label for="report-note">Describe it (optional)
-            <input id="report-note" maxlength="200" placeholder="e.g. water above the footpath near the school">
-          </label>
-          <div class="od-row">
-            <span class="pin r">R</span><span id="report-loc" class="od-text muted">No location chosen</span>
-            <button id="btn-pick-report" class="small ghost">Choose on map</button>
-          </div>
-          <button id="btn-report" disabled>Send report</button>
-          <p id="report-msg" class="msg" aria-live="polite"></p>
-          <p class="hint">A traffic officer checks every report before other commuters see it.</p>
-          <ul id="my-reports" class="list"></ul>
+        <div class="section-head">
+          <h3>On the roads now</h3>
+          <span id="live-count" class="muted small"></span>
         </div>
+        <ul id="live-list" class="rows"></ul>
+        <p class="foot">Water-depth limits per vehicle are assumed demo values, not safety guidance. Anything marked Simulated comes from the demo simulator.</p>
       </section>
 
-      <!-- AUTHORITY -->
-      <section id="view-authority" class="view hidden">
-        <div id="login-box" class="block">
-          <h2>Officer login</h2>
-          <label for="user">Username <input id="user" value="officer" autocomplete="username"></label>
-          <label for="pass">Password <input id="pass" type="password" autocomplete="current-password"></label>
-          <button id="btn-login">Log in</button>
-          <p id="login-msg" class="msg" aria-live="polite"></p>
-        </div>
+      <section id="tab-report" class="tabpane" role="tabpanel" aria-labelledby="tab-btn-report" hidden>
+        <h2>Report a problem on the road</h2>
+        <p class="lead">Your report goes to the traffic control room first, then to police on the ground. It reaches the map only after both have checked it.</p>
 
-        <div id="dash" class="hidden">
-          <div class="block">
-            <div class="row spread"><h2>Incidents</h2><button id="btn-logout" class="ghost small">Log out</button></div>
-            <div id="kpis" class="kpis"></div>
-            <h3>Pending review</h3>
-            <ul id="officer-pending" class="list"></ul>
-            <h3>Active</h3>
-            <ul id="officer-active" class="list"></ul>
-          </div>
-
-          <div class="block">
-            <h2>Flood countdown</h2>
-            <div class="row">
-              <label class="grow" for="rain">Rain override (mm/h) <input id="rain" type="number" min="0" max="200" step="1" placeholder="use forecast"></label>
-              <button id="btn-rain" class="small">Set</button>
-            </div>
-            <p id="rain-source" class="hint"></p>
-            <ul id="officer-hotspots" class="list"></ul>
-          </div>
-
-          <div class="block">
-            <h2>Decision support</h2>
-            <div id="decision" class="card muted">Select an incident, then run a what-if, get signal advice or draft a bulletin.</div>
-          </div>
-
-          <details class="block">
-            <summary>Register planned works</summary>
-            <label for="pw-title">Title <input id="pw-title" value="Pipeline digging"></label>
-            <label for="pw-start">Starts in (min) <input id="pw-start" type="number" value="0"></label>
-            <label for="pw-hours">Duration (h) <input id="pw-hours" type="number" value="4"></label>
-            <label class="check"><input id="pw-full" type="checkbox" checked> Full closure</label>
-            <div class="od-row"><span class="pin r">W</span><span id="pw-loc" class="od-text muted">No location chosen</span>
-              <button id="btn-pick-works" class="small ghost">Choose on map</button></div>
-            <button id="btn-pw" disabled>Register</button>
-            <p id="pw-msg" class="msg" aria-live="polite"></p>
-          </details>
-
-          <details class="block">
-            <summary>Before / after evaluation</summary>
-            <p class="hint">Simplified traffic model on this map, not SUMO. Uses current verified incidents.</p>
-            <button id="btn-eval">Run evaluation</button>
-            <div id="eval-result"></div>
-          </details>
-
-          <div class="block">
-            <h2>Activity</h2>
-            <ul id="events" class="list small"></ul>
+        <div class="group">
+          <span class="field-label" id="type-label">What is happening?</span>
+          <div class="seg big" role="radiogroup" aria-labelledby="type-label">
+            <input type="radio" name="rtype" id="t-flood" value="flood" checked><label for="t-flood">Waterlogging<span>Water standing on the road</span></label>
+            <input type="radio" name="rtype" id="t-accident" value="accident"><label for="t-accident">Accident<span>Collision or vehicle down</span></label>
+            <input type="radio" name="rtype" id="t-blockage" value="blockage"><label for="t-blockage">Road blocked<span>Tree, breakdown, gathering</span></label>
+            <input type="radio" name="rtype" id="t-construction" value="construction"><label for="t-construction">Construction<span>Digging or works</span></label>
           </div>
         </div>
+
+        <div class="group">
+          <span class="field-label">Where?</span>
+          <div class="where">
+            <button id="btn-pick" class="dark">Choose on the map</button>
+            <span id="report-loc" class="muted small">No place chosen yet</span>
+          </div>
+        </div>
+
+        <div class="group">
+          <label class="field" for="report-note">What can you see? <span class="muted">(optional)</span></label>
+          <textarea id="report-note" maxlength="200" placeholder="Water up to the scooter footrest near the bus stop"></textarea>
+        </div>
+
+        <button id="btn-send" class="primary block" disabled>Send report</button>
+        <p id="report-msg" class="msg" aria-live="polite"></p>
+
+        <div class="section-head"><h3>Your reports</h3></div>
+        <ul id="my-reports" class="rows"></ul>
       </section>
+
+      <nav class="staff">Staff: <a href="/control">Control room</a> <a href="/field">Field police</a></nav>
     </aside>
+
+    <div id="map" class="map" aria-label="Map of the pilot area"></div>
   </main>
-  <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
 
   <script src="/static/vendor/leaflet/leaflet.js"></script>
+  <script src="/static/rp/core.js"></script>
   <script src="/static/app.js"></script>
 </body>
 </html>

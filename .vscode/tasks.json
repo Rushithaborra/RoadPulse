@@ -1,0 +1,58 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "RoadPulse: install dependencies",
+      "type": "shell",
+      "command": "${command:python.interpreterPath}",
+      "args": ["-m", "pip", "install", "-r", "requirements-dev.txt"],
+      "problemMatcher": []
+    },
+    {
+      "label": "RoadPulse: start server",
+      "type": "shell",
+      "command": "${command:python.interpreterPath}",
+      "args": ["-m", "uvicorn", "app.main:app", "--app-dir", "backend", "--env-file", ".env",
+               "--no-access-log", "--timeout-graceful-shutdown", "3"],
+      "isBackground": true,
+      "problemMatcher": {
+        "pattern": { "regexp": "^__never__$" },
+        "background": { "activesBegin": ".", "beginsPattern": "Started server process", "endsPattern": "Uvicorn running on" }
+      },
+      "presentation": { "panel": "dedicated", "reveal": "always" },
+      "group": { "kind": "build", "isDefault": true }
+    },
+    {
+      "label": "RoadPulse: run tests",
+      "type": "shell",
+      "command": "${command:python.interpreterPath}",
+      "args": ["-m", "pytest", "-q", "tests"],
+      "group": { "kind": "test", "isDefault": true },
+      "problemMatcher": []
+    },
+    {
+      "label": "RoadPulse: demo - flood story (step by step)",
+      "type": "shell",
+      "command": "${command:python.interpreterPath}",
+      "args": ["simulator/demo.py", "story"],
+      "presentation": { "panel": "dedicated", "focus": true },
+      "problemMatcher": []
+    },
+    {
+      "label": "RoadPulse: demo - two checks on a citizen report",
+      "type": "shell",
+      "command": "${command:python.interpreterPath}",
+      "args": ["simulator/demo.py", "checks"],
+      "presentation": { "panel": "dedicated", "focus": true },
+      "problemMatcher": []
+    },
+    {
+      "label": "RoadPulse: demo - urgent fast-track",
+      "type": "shell",
+      "command": "${command:python.interpreterPath}",
+      "args": ["simulator/demo.py", "checks", "--urgent"],
+      "presentation": { "panel": "dedicated", "focus": true },
+      "problemMatcher": []
+    }
+  ]
+}
