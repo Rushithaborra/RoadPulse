@@ -105,7 +105,7 @@ function unitRows(i) {
 function why(i) {
   const ev = evidence(i), pct = Math.round((i.confidence || 0) * 100);
   return `<div data-evidence><b>Why we think so</b><ul style="margin:6px 0 0 18px;padding:0">${ev.map((e) => `<li>${esc(e)}</li>`).join("") || "<li>No evidence recorded yet.</li>"}</ul>
-    <div class="small muted" data-confidence style="margin-top:4px">How sure the system is: ${pct}%${i.simulated ? ' · <span class="demo">demo data</span>' : ""}</div></div>`;
+    <div class="small muted" data-sure style="margin-top:4px">How sure the system is: ${pct}%${i.simulated ? ' · <span class="demo">demo data</span>' : ""}</div></div>`;
 }
 function pendingDetail(i) {
   const d = state.detail[i.id] || {}, fs = i.field_state, s = SEV[i.field_severity || i.severity], ev = evidence(i), reps = d.field_reports || [];

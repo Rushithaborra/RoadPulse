@@ -104,8 +104,8 @@ def test_the_flood_story_end_to_end(live, pages):
     card.click()
     expect(control.locator("[data-evidence]")).to_contain_text("Water sensor reads 35 cm")
     expect(control.locator("[data-evidence]")).to_contain_text("driver report")
-    expect(control.locator("[data-confidence]")).to_contain_text(re.compile(r"\d+%"))
-    expect(control.locator("[data-confidence]")).to_contain_text("demo data")                 # simulated evidence is labelled
+    expect(control.locator("[data-sure]")).to_contain_text(re.compile(r"\d+%"))
+    expect(control.locator("[data-sure]")).to_contain_text("demo data")                 # simulated evidence is labelled
 
     # -- 6. The officer approves a diversion (a real backend call, not a UI-only change)
     control.get_by_role("button", name=re.compile("Approve diversion")).click()

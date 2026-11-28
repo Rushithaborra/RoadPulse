@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 IncidentType = Literal["flood", "accident", "blockage", "construction", "slowdown"]
 Severity = Literal["Low", "Medium", "Severe", "Closed"]
 Status = Literal["Reported", "Verified", "Responding", "Cleared"]
-Source = Literal["sensor", "probe", "cctv", "report", "planned", "officer", "field"]
+Source = Literal["sensor", "probe", "report", "planned", "officer", "field"]
 VehicleClass = Literal["two_wheeler", "auto", "car", "ambulance", "bus"]
 
 SEVERITY_ORDER = {"Low": 0, "Medium": 1, "Severe": 2, "Closed": 3}
@@ -109,6 +109,14 @@ class CitizenReport(BaseModel):
     note: Optional[str] = Field(default=None, max_length=200)
     photo_url: Optional[str] = Field(default=None, max_length=500)
     simulated: bool = False  # set by the demo simulator so the UI can label the data
+
+    @field_validator("photo_url")
+    @classmethod
+    def _web_link_only(cls, v):
+        """Nothing renders this today, but if a screen ever links it, `javascript:` and `data:` links must not get in."""
+        if v and not v.strip().lower().startswith(("http://", "https://")):
+            raise ValueError("must be an http or https link")
+        return v
 
 
 class ProbeSample(BaseModel):

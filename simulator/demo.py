@@ -5,6 +5,7 @@ Usage:
   python simulator/demo.py all --auto     # no pauses
   python simulator/demo.py flood | accident | drain | works
   python simulator/demo.py story          # the 10-step hackathon demo (see docs/DEMO.md), pauses between steps
+  python simulator/demo.py accident-field # an accident through the two-stage police check (--police-user/--police-password)
   python simulator/demo.py story --auto --auto-officer   # unattended: the script also plays the officer
 Options: --url http://localhost:8000  --device-key KEY  --user officer --password PASS
          --no-sensor   (skip simulated depth when the real ESP32 is connected)
@@ -239,9 +240,73 @@ class Demo:
         print("    recovery evidence sent (SIMULATED)")
 
 
+def police_token(self):
+    if not getattr(self, "_ptok", None):
+        r = self.c.post("/api/auth/login", json={"username": self.a.police_user, "password": self.a.police_password})
+        if r.status_code != 200:
+            raise SystemExit(f"Police login failed ({r.status_code}). Set POLICE_USERS in .env or pass --police-user and --police-password.")
+        self._ptok = {"Authorization": f"Bearer {r.json()['token']}"}
+    return self._ptok
+
+
+def accident_field(self):
+    """An accident through the two-stage check. Nothing reaches drivers until police have confirmed on the scene AND
+    the control room has confirmed in turn. Every status printed is read back from the API."""
+    off, pol = self.officer(), self.police_token()
+    lat, lon = self.on_road(-150, -75)
+
+    def public():
+        return self.c.get("/api/incidents?scope=public").json()["incidents"]
+
+    def mine(iid):
+        return next(i for i in self.c.get("/api/incidents?scope=all", headers=off).json()["incidents"] if i["id"] == iid)
+
+    self.pause("1. A citizen reports an accident (SIMULATED report)")
+    r = self.c.post("/api/reports", json={"type": "accident", "lat": lat, "lon": lon, "reporter_id": "field-demo", "note": "two bikes down", "simulated": True}).json()
+    iid = r["incident_id"]
+    print(f"    report → {r['status']} (confidence {r['confidence']}); commuters see {len(public())} incident(s)")
+
+    self.pause("2. The control room tries to publish it straight away: refused until police have checked")
+    v = self.c.post(f"/api/incidents/{iid}/verify", json={}, headers=off)
+    print(f"    control room verify → HTTP {v.status_code}: {v.json().get('detail')}")
+    print(f"    commuters still see {len(public())} incident(s)")
+
+    self.pause(f"3. The police unit signs in and shares its location; the control room sends it ({self.a.police_user})")
+    self.c.post("/api/police/position", json={"lat": lat + 0.0006, "lon": lon + 0.0004}, headers=pol)
+    units = self.c.get(f"/api/incidents/{iid}/units", headers=off).json()["units"]
+    near = next((u for u in units if u["unit"] == self.a.police_user), units[0])
+    print(f"    nearest unit: {near['unit']}" + (f", {near['eta_min']} min away" if near.get("eta_min") is not None else ""))
+    a = self.c.post(f"/api/incidents/{iid}/assign", json={"unit": near["unit"]}, headers=off)
+    print(f"    sent → HTTP {a.status_code}")
+
+    self.pause("4. The unit accepts, travels, arrives, and reports what it SEES")
+    for st in ("accepted", "on_way", "arrived"):
+        self.c.post(f"/api/police/calls/{iid}/status", json={"status": st}, headers=pol)
+        print(f"    unit status: {st}")
+    self.c.post(f"/api/police/calls/{iid}/report", json={"finding": "blocked", "need": ["tow"], "note": "two bikes down, lane blocked"}, headers=pol)
+    inc = mine(iid)
+    print(f"    police report sent → field state: {inc['field_state']}; still not public: {len(public())} incident(s)")
+
+    self.pause("5. The control room confirms: only now are drivers warned")
+    v = self.c.post(f"/api/incidents/{iid}/verify", json={}, headers=off)
+    inc = mine(iid)
+    print(f"    control room verify → HTTP {v.status_code}; status {inc['status']}, severity {inc['severity']}; commuters see {len(public())} incident(s)")
+
+    self.pause("6. The unit reports the road is open; the control room clears it")
+    self.c.post(f"/api/police/calls/{iid}/report", json={"finding": "open", "need": [], "note": "road open"}, headers=pol)
+    print(f"    field state: {mine(iid)['field_state']}")
+    c = self.c.post(f"/api/incidents/{iid}/clear", json={}, headers=off)
+    print(f"    control room clear → HTTP {c.status_code}; commuters see {len(public())} incident(s)")
+    print("\nEverything the simulator sent is marked SIMULATED in the apps.")
+
+
+for _f in (police_token, accident_field):
+    setattr(Demo, _f.__name__, _f)
+
+
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument("scenario", choices=["all", "flood", "accident", "drain", "works", "story"])
+    p.add_argument("scenario", choices=["all", "flood", "accident", "drain", "works", "story", "accident-field"])
     p.add_argument("--auto-officer", action="store_true", help="story: act as the officer through the API")
     p.add_argument("--url", default="http://localhost:8000")
     env = read_env()
@@ -249,6 +314,9 @@ def main():
     p.add_argument("--device-key", default=env.get("DEVICE_KEYS", "").split(",")[0] or None)
     p.add_argument("--user", default=users[0][0].strip() if users else "officer")
     p.add_argument("--password", default=users[0][1].strip() if users else None)
+    cops = [u.split(":", 1) for u in env.get("POLICE_USERS", "").split(",") if ":" in u]
+    p.add_argument("--police-user", default=cops[0][0].strip() if cops else "unit1")
+    p.add_argument("--police-password", default=cops[0][1].strip() if cops else None)
     p.add_argument("--auto", action="store_true")
     p.add_argument("--no-sensor", action="store_true")
     p.add_argument("--step", type=float, default=1.5, help="seconds between simulated readings")
@@ -258,6 +326,9 @@ def main():
     d = Demo(a)
     if a.scenario == "story":
         d.story()
+        return
+    if a.scenario == "accident-field":
+        d.accident_field()
         return
     if a.scenario in ("all", "works"):
         d.works()

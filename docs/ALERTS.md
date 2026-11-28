@@ -6,7 +6,7 @@ does about it and where the test is (`tests/test_alerts.py`, `tests/test_bot.py`
 
 | Doubt | What the code does |
 |---|---|
-| **Accidents and construction, not only floods. Who updates them?** | Accidents come from citizen reports, camera/sensor signals and fleet probes, and an **officer decides** (`Verify`, and chooses the severity: Low / Medium / Severe / **Closed**). Construction is **never detected**: the agency enters it as planned works with a time window, and it is included in pre-trip alerts if it overlaps the departure. |
+| **Accidents and construction, not only floods. Who updates them?** | Accidents come from citizen reports, water-sensor readings (floods only) and fleet probes, and an **officer decides** (`Verify`, and chooses the severity: Low / Medium / Severe / **Closed**). Construction is **never detected**: the agency enters it as planned works with a time window, and it is included in pre-trip alerts if it overlaps the departure. |
 | **Speed alone cannot decide (a senior citizen drives slowly)** | Probe rule v2 in `probe_rules.py`: a vehicle gets **one vote**; at least **8 distinct vehicles**; a **clear majority (60%) and the median** must be under 40% of **this road's normal speed for this time of week** (learned; a fraction of the speed limit until learned); samples within 60 m of a **junction are ignored** (signal queues); the dip must **last 3 minutes**; if neighbouring links are slow too it is **congestion**, not an incident. A probe is **not a trusted source**: it only creates a *Suspected slowdown* for officers. |
 | **An accident between two signals** | Probes are judged per road **link** (junction to junction, curve points merged), and the incident is placed **where the slow vehicles are**, so it needs no sensor at a junction. Citizen reports and calls work anywhere on the map. |
 | **Who sends the alert, how, and to whom? Not everyone needs it.** | A human publishes the incident; the system then warns **only people whose own route uses the affected road** (`alerts.plan_trip`). There is **no fixed radius**. Channels: the phone page (optionally spoken), Telegram, and simulated roadside boards. |
@@ -27,7 +27,7 @@ A citizen report is untrusted and never publishes on its own. The flow:
 5. **Police say the road is open** and the control room clears it (or traffic recovery does).
 
 Fast track: the control room can confirm as `urgent` with no police check; this is recorded in the audit log.
-Trusted sources (water sensor, camera, planned works) skip the police step. Police tokens cannot use control-room
+Trusted sources (water sensor, planned works) skip the police step. Police tokens cannot use control-room
 endpoints and the control room cannot use police ones. Turn the step off with `REQUIRE_FIELD_CONFIRMATION=0`.
 Tests: `tests/test_field.py`.
 
@@ -35,7 +35,7 @@ Tests: `tests/test_field.py`.
 
 ```
 fleet probes ──► probe_rules (many vehicles, link level, normal for this hour, must last) ──► Suspected (officers only)
-citizen / camera / 112 / planned works ──► fusion ──► Reported
+citizen / water sensor / planned works ──► fusion ──► Reported
                                                          │  officer verifies + sets severity (+ dispatches units)
                                                          ▼
                                                     Verified  ──► alerts.on_status ──► for each subscriber:

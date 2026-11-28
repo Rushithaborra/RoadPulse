@@ -5,7 +5,7 @@ A citizen report never publishes on its own. The flow we agreed on:
   2. The control room sends the nearest police unit to check (assign).
   3. The unit accepts, travels, arrives, and reports what it SEES: blocked, one lane, not real, or open.
   4. The control room confirms (one tap, using the police finding as the default severity) and drivers are warned.
-The control room can fast-track a real emergency (urgent), which is recorded. Water sensors, cameras and planned works
+The control room can fast-track a real emergency (urgent), which is recorded. Water sensors and planned works
 are already trusted and do not need a police check.
 
 A police report is a strong signal but it does NOT publish by itself: both people validate.
@@ -25,7 +25,7 @@ def needs_field(inc: Incident) -> bool:
     """True when the control room must wait for a police confirmation (or mark the incident urgent)."""
     if not config.field_required() or inc.urgent or inc.field_confirmed_at or inc.type == "construction":
         return False
-    return not any(s.source in ("sensor", "cctv", "planned") for s in inc.signals)
+    return not any(s.source in ("sensor", "planned") for s in inc.signals)
 
 
 def field_state(inc: Incident) -> str:
