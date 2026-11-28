@@ -3,7 +3,9 @@ services:
     build: .
     ports:
       - "8000:8000"
-    env_file: .env
+    env_file: .env          # copy .env.example to .env first
     volumes:
-      - ./data:/app/data   # SQLite file and optional area.graphml survive restarts
+      - roadpulse-data:/app/data   # a named volume: starts with the image's data (including area.graphml), stays writable, survives restarts
     restart: unless-stopped
+volumes:
+  roadpulse-data:

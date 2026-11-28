@@ -1,80 +1,93 @@
-# RoadPulse demo script (about 6 minutes)
+# Demo script (about 8 minutes)
 
-Pilot area: Dwaraka Nagar and the RTC Complex (Dwaraka Bus Station), Visakhapatnam, on real OpenStreetMap roads.
-Everything the simulator sends is marked **SIMULATED** in the interface. Say so out loud.
+Pilot area: Dwaraka Nagar and the RTC Complex (Dwaraka Bus Station), Visakhapatnam, on **real OpenStreetMap roads**.
+Everything the simulator sends is flagged `simulated` and labelled **SIMULATED / demo** in every app. Say so out loud.
 
-## Before you start (once)
-
-First time only, in the project folder (a fresh checkout or unzip has no virtual environment and no `.env`):
+## Before you start (once, 10 minutes)
 
 ```powershell
+cd <project folder>
 python -m venv .venv
-.\.venv\Scripts\Activate.ps1          # needs the leading .\ ; if blocked: Set-ExecutionPolicy -Scope Process Bypass
+.\.venv\Scripts\Activate.ps1          # the leading .\ is required; if blocked: Set-ExecutionPolicy -Scope Process Bypass
 pip install -r requirements-dev.txt
-Copy-Item .env.example .env
+Copy-Item .env.example .env           # then put real values for the passwords, keys and secret in .env
 ```
 
-Every time, to start the server:
+For a demo, in `.env` set `CLEAR_WINDOW_S=300` (so an incident does not clear itself before the officer does) and note the
+logins: `OFFICER_USERS` (control room), `POLICE_USERS` (police) and `DEVICE_KEYS` (simulator).
+
+Start the server (stop it with Ctrl+C; for a clean slate delete `data\roadpulse.db*` first):
 
 ```powershell
-.\.venv\Scripts\Activate.ps1
 uvicorn app.main:app --app-dir backend --env-file .env --no-access-log --timeout-graceful-shutdown 3
 ```
 
-- Open http://localhost:8000 in **two** browser windows side by side: the left one stays on **Commuter**, the right
-  one goes to **Traffic authority** and logs in (user and password from `OFFICER_USERS` in `.env`).
-- Check the header of the left window: green "Real OpenStreetMap roads" and `live`. A red MAP WARNING means the real
-  map did not load: stop and fix that first (`python tools/fetch_map.py`).
-- In a second terminal, in the same folder and virtual environment: `python simulator/demo.py story`. The script
-  stops before every step and waits for Enter, so you decide the pace. Fresh start for a repeat run: restart the
-  server (the demo database is `data/roadpulse.db`; delete it for a clean slate).
-- In the left window press **Jump to: Dwaraka Nagar**, choose **Two-wheeler**, and zoom in on the green circle
-  *Demo hotspot A (simulated)* on 4 th Lane Dwaraka nagar. Open the **Map legend** once so the audience can read it.
+Open six browser windows and arrange them side by side:
 
-## The ten steps
+| Window | Address | Do first |
+|---|---|---|
+| 1 Commuter | `http://localhost:8000/` | nothing; green "All clear" card |
+| 2 Control room | `/control` | sign in as an officer |
+| 3 Police (a phone, or a second window) | `/police` | sign in as `unit1`; **Allow** location when asked |
+| 4 Alerts | `/commute` | name "Ravi", vehicle two-wheeler, tap **Set home** then tap the road about 100 m **west** of the flood-watch spot, **Set work** about 100 m **east** of it (the spot is on *4 th Lane Dwaraka nagar*, 17.72798 N, 83.30584 E), tick consent, **Start getting alerts**, then **Set my departure** (10 min) |
+| 5 Alerts B | `/commute` in a **private window** (it is a different person) | name "Asha", two-wheeler, home and work the same way, consent, **Start getting alerts**; do **not** set a departure |
+| 6 Board | `/board` | open the board list; leave it for step 8 |
 
-| # | Say / do | What the audience sees | Press Enter in the terminal |
-|---|---|---|---|
-| 1 | "A commuter opens RoadPulse." Click **A** west and **B** east of the circle on 4 th Lane. | Route follows the real road: **106 m, 15 s**. Live alerts: none. | Step 1 prints the same numbers from the API. |
-| 2 | "A citizen reports waterlogging." (Script sends a simulated report.) | The left window shows **nothing new**: a public report is never published on its own. The right window shows it under **Pending review**. | Step 2 |
-| 3 | "A water-depth sensor reports rising water." (Simulated sensor, 4 to 35 cm, about 10 seconds.) | Right window: confidence rises. Left window, **live while the depth climbs**: within a few seconds the sensor evidence (a keyed sensor is a trusted source) verifies the incident, a toast says *New verified alert*, and the alert and **W** marker appear, at first as a minor slowdown with the route unchanged. As the water passes the assumed two-wheeler limit the severity rises, the road gets a black dotted overlay ("blocked for the vehicle you picked") and the route **redraws around it by itself**. | Step 3 |
-| 4 | "The system assesses it." In the right window open **Evidence**. | Status **Verified**, severity **Severe**, confidence **0.87**; the table lists the sensor and report signals, each with a SIMULATED badge. Explain: with the report, the sensor evidence passes the 0.70 confidence bar. | Step 4 |
-| 5 | "The authority approves the diversion." Click **Approve diversion** (or let the script do it with `--auto-officer`). | Right window: status **Responding**. | Step 5 |
-| 6 | "The affected road is marked." Point at the map. | Left window: the affected road segment in red (severity colour), the **W** marker, the legend entry for each. | Step 6-8 |
-| 7 | "The commuter has an alternative route." | Left window: **A** west to **B** east now takes **299 m / 40 s** instead of 106 m (the opposite direction is 362 m); the panel says *usual route is affected, diversion 299 m versus 106 m*. Switch to **Bus**: it still goes straight through (106 m), because the assumed limit for a bus is higher. | |
-| 8 | "The authority dashboard updates." | Right window: KPIs, incident list and Activity log have all moved. Optionally press **What-if**, **Signals**, **Bulletin**. | |
-| 9 | "Recovery evidence arrives." (Rain stops, depth falls to 3 cm, probe speeds normal.) | Severity falls to **Low**; the two-wheeler route goes straight again with the note *still the best option, expect slower traffic there*. | Step 9 |
-| 10 | "The incident is resolved." Click **Resolve** (or wait for the auto-clear, `CLEAR_WINDOW_S`). | Left window: toast *Resolved ... the road is available again*, the red road disappears, the route returns to **106 m**. | Step 10 |
+Second terminal, same folder, virtual environment active. Put the logins in variables once:
 
-## Optional extras (one minute each)
+```powershell
+$K = "<DEVICE_KEYS value>"; $P = "<OFFICER password>"; $U = "<POLICE password>"
+```
 
-- **Citizen report on screen:** in the left window open **Report a problem**, press **Choose on map**, click a road, type a
-  note, **Send report**. It shows *waiting for officer review*. In the right window **Verify** it: the left window
-  changes the report's status to *verified*.
-- **Accident that needs an officer:** `python simulator/demo.py accident`: a speed drop plus one report scores 0.675,
-  below the bar, so it waits in **Pending review** until someone presses **Verify**.
-- **Connection loss:** stop the server for 10 seconds: both windows show a red banner (*live updates lost*) and the
-  badge `offline · reconnecting…`; they recover on their own when it is back.
-- **Evaluation:** right window, **Before / after evaluation**. Say it is a simplified traffic model, not SUMO, with
-  the assumptions printed under the table.
+Health check: `http://localhost:8000/api/health` must show `"map_mode":"osm"` and `"map_warning":null`, and window 1 shows the **Live** chip. A red map warning means the real map did not load: stop and fix that first.
 
-## What to say about honesty
+## Part 1: the flood (about 5 minutes)
 
-- The road map is real OpenStreetMap data; the water depth, rain and sensor in the demo are **simulated**.
-- The hotspot is a **simulated point on a real road**, not a known flood location.
-- The depth limits per vehicle are **assumed demo values**, not safety guidance.
-- RoadPulse gives signal advice only; it controls no signal. There is no camera detection and no trained
-  prediction model.
-- The ESP32 sensor sketch is written but has not been tested on hardware.
+| # | Say and do | What the audience sees |
+|---|---|---|
+| 1 | "A commuter opens RoadPulse." In window 1 tap the top bar, type `4 th` in **From**, pick the first result, type `RTC` in **To**, pick it. | A route on the map and **Your way is clear**, about 2 min. |
+| 2 | "A citizen reports waterlogging." Window 1: **Report**, **Water**, tap the road at the flood-watch spot, **Send report**. | A thank-you, and under **Your reports**: **Waiting for a check**. Nobody else is warned: a report alone never publishes. |
+| 3 | "Simulated sensor readings arrive." Terminal: `python simulator/demo.py flood --auto --device-key $K --user officer --password $P` | About 10 seconds of lines such as `simulated sensor-01 depth 35 cm -> incident inc-...` and `report -> Verified`. |
+| 4 | "The system assesses it: a trusted sensor plus the report is enough to publish." | Window 1: a toast (new road problem) and the card **Water on the road on 4 th Lane Dwaraka nagar, Very slow, demo**. **Your reports** turns to **Confirmed**. |
+| 5 | "The control room reviews it." Window 2: open the card. | **Why we think so**: *Water sensor reads 35 cm*, *1 driver report says there is a problem here*, **How sure the system is: 87% . demo data**. |
+| 6 | "The officer approves a diversion." Tap **Approve diversion**. | A toast and the green **Diversion approved** box. |
+| 7 | "The commuter gets a new route." Window 1: **Start again**, tap the problem card, **See a way round**. | **A problem on your usual way ... Take the green route if you can: 1 min longer**, the usual way dashed red, the better way green. Switch to **Bus**: no faster way round, expect delays (a bus can still pass). |
+| 8 | "People are warned, and a roadside board shows it." Window 5 (Asha): **Demo: simulate my drive**. Window 6: open the board that says WARNING. | Window 4 (Ravi, who planned a trip): a **pre trip** alert with the way round. Window 5 (Asha, on the road): an **in trip** or **turn back** alert, marked SIMULATED (each person is warned once per incident). Window 6: **AVOID ... Water on road ... m ahead**, `SIMULATED DISPLAY`. Window 2 shows **Warnings sent** (anonymous). |
+| 9 | "Recovery observations arrive." Terminal: `python simulator/demo.py drain --auto --device-key $K --user officer --password $P` | Depths 28 down to 3 cm. Window 2: **Looks like it is recovering**. |
+| 10 | "The officer resolves it." Window 2: **The road is clear again**, tap again to confirm. | Toast: *Road marked clear. Everyone who was warned is told.* |
+| 11 | "Everyone gets the all-clear." | Windows 4 and 5: a green **clear** alert. Window 1: **All clear**, your original route again, **Your reports: Resolved**. Window 6: **ROAD CLEAR**. |
+
+## Part 2: an accident and the two-stage police check (about 2 minutes)
+
+| # | Say and do | What the audience sees |
+|---|---|---|
+| 12 | "A report is not enough: police must check it on the scene." Window 1: **Report**, **Accident**, tap a road about 500 m away, **Send report**. | **Waiting for a check**. Window 2: **Possible accident on ...**, no confirm button. |
+| 13 | Window 2: open the card, tap **Send** next to `unit1`. | *unit1 is being sent to check.* Still nothing public. |
+| 14 | Window 3: the call arrives. **Accept**, **I'm on my way**, **I've arrived**, **Blocked**, **Send to control room**. | Window 3: *Sent to the control room.* Window 2: **Police confirmed: road blocked**. |
+| 15 | Window 2: **Confirm: Blocked and warn drivers**. | Only now: window 1 shows **Accident on ...**. |
+| 16 | Window 3: **The road is open**. Window 2: **Clear road**, tap again. | Window 1: **All clear**. |
+
+Backup for Part 2 with no clicking: `python simulator/demo.py accident-field --auto --device-key $K --user officer --password $P --police-user unit1 --police-password $U` prints each step, including the control room being refused with HTTP 409 until police have checked.
+
+## Close (30 seconds)
+
+"The map and the rules are real. The water depth, rain, sensors and boards are simulated and labelled. The vehicle depth limits are assumed values, not safety guidance. There is no camera detection, no trained model and no signal control. The sensor hardware sketch exists but was not part of this software-only delivery."
+
+## Other demos
+
+- Everything in Part 1 with no browser: `python simulator/demo.py story --auto --auto-officer --device-key $K --user officer --password $P`
+- The alert story (suspicion only, two checks, pre-trip, in-trip, boards, all-clear, data deletion): `python simulator/alerts_demo.py --device-key $K --password $P --police-user unit1 --police-password $U --auto`
+- The same flows run automatically in real Chrome: `python -m pytest -q tests/e2e` (see the README).
 
 ## If something goes wrong
 
 | Symptom | Fix |
 |---|---|
-| Red MAP WARNING banner | `data/area.graphml` is missing or broken: `python tools/fetch_map.py`, restart. |
-| Map tiles are grey | No internet for the tiles: roads and routing still work; use a phone hotspot. |
-| `live` turns to `stale` | The server stopped answering; restart it, the page reconnects by itself. |
-| Officer login fails | Check `OFFICER_USERS` in `.env`; the server log prints generated ones if it was empty. |
-| Route says no legal route | One-way streets: pick two points on the same two-way road, as in step 1. |
-| Repeat the demo | Restart the server (delete `data/roadpulse.db` for a clean slate) and run `story` again. |
-| Backup | Record the run once beforehand as a video. |
+| Red map warning | `data\area.graphml` is missing or broken. Restore it from the repository (or `python tools/fetch_map.py`) and restart. |
+| A step shows nothing | Wait 3 seconds (the apps refresh every 2.5 s). The header chip says **live**; **offline** means the server stopped. |
+| You pressed things in the wrong order | Stop the server, delete `data\roadpulse.db*`, start it again (about 10 seconds) and begin at step 1. |
+| The incident cleared itself | `CLEAR_WINDOW_S` ran out after step 9. Re-run step 3 and carry on. |
+| Police window sees no call | Allow location in the browser, sign in as `unit1`, and check the control room shows the unit under the incident. |
+| 401 or "session ended" | Sign in again; tokens last 8 hours and do not survive a changed `ROADPULSE_SECRET`. |
+| Map tiles are grey | No internet for the background tiles. Roads, routing and every other function still work. |
+| Total failure | Play the backup video, or run `python simulator/demo.py story --auto --auto-officer ...` and read the output aloud. |

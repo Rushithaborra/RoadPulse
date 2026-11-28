@@ -116,3 +116,20 @@ def test_phone_layout_is_usable(live, pages):
     expect(page.locator("#q-to")).to_be_visible()
     assert page.evaluate("document.documentElement.scrollWidth") <= 391
     assert not pages.problems(), pages.problems()
+
+
+def test_see_a_way_round_really_shows_a_way_round_the_problem(live, pages):
+    """The button on a problem card must build a trip that crosses the problem, for every vehicle that is blocked."""
+    live.clear_everything()
+    live.sensor([18, 25, 31, 35])                                              # severe flood: cars and two-wheelers are blocked
+    page = pages.open("/")
+    page.locator(".prob").first.click()
+    expect(page.locator("#body")).to_contain_text("Water about 35 cm deep")
+    page.locator('[data-act="detour"]').click()
+    expect(page.locator(".hero")).to_contain_text(re.compile(r"usual way|problem on your way"), timeout=15000)
+    expect(page.locator(".hero")).to_contain_text("green route")
+    assert page.locator(".leaflet-overlay-pane path").count() >= 4, "the blocked road and the detour are both drawn"
+    page.locator('[data-veh="bus"]').click()                                   # a bus may still pass 35 cm of water
+    expect(page.locator(".hero")).to_contain_text(re.compile(r"problem on your way|Your way is clear|usual way"))
+    live.clear_everything()
+    assert not pages.problems(), pages.problems()

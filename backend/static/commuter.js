@@ -182,9 +182,12 @@ function resetTrip() { state.A = state.B = state.trip = state.An = state.Bn = nu
 function exampleTrip(i) {
   state.A = state.B = state.trip = state.An = state.Bn = null; L_.trip.clearLayers();
   if (i && i.affected_segments && i.affected_segments.length) {
-    const [p, q] = i.affected_segments[0], kx = 111320 * Math.cos((i.lat * Math.PI) / 180), ky = 111320;
-    let dx = (q[1] - p[1]) * kx, dy = (q[0] - p[0]) * ky; const n = Math.hypot(dx, dy) || 1; dx /= n; dy /= n;
-    const off = (m) => [i.lat + (dy * m) / ky, i.lon + (dx * m) / kx]; state.A = off(-260); state.B = off(260); map.flyTo([i.lat, i.lon], 17, { duration: 0.6 });
+    // The two ends of the affected road, the pair furthest apart: they straddle the incident, so the usual route is the
+    // blocked road itself and the card can show the way round. (Points a fixed distance away could land on other streets.)
+    const pts = i.affected_segments.flat().map((p) => [p[0], p[1]]), kx = 111320 * Math.cos((i.lat * Math.PI) / 180), ky = 111320;
+    let best = [pts[0], pts[pts.length - 1]], bd = -1;
+    for (const a of pts) for (const b of pts) { const d = ((a[1] - b[1]) * kx) ** 2 + ((a[0] - b[0]) * ky) ** 2; if (d > bd) { bd = d; best = [a, b]; } }
+    state.A = best[0]; state.B = best[1]; map.flyTo([i.lat, i.lon], 18, { duration: 0.6 });
   } else { state.A = state.center; state.B = [17.7238639, 83.3068879]; map.fitBounds([state.A, state.B], { padding: [80, 80] }); }
   drawTripPins(); setView("trip"); runTrip();
 }
