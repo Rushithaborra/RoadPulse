@@ -115,7 +115,8 @@ def create_subscriber(store: Store, data, ts: float | None = None) -> Subscriber
 
 
 def check_token(sub: Subscriber, token: str | None) -> bool:
-    return bool(token) and hmac.compare_digest(sub.token, token)
+    # bytes, not str: compare_digest raises TypeError on non-ASCII text, which would turn a bad token into a 500
+    return bool(token) and hmac.compare_digest(sub.token.encode("utf-8"), token.encode("utf-8"))
 
 
 # ------------------------------------------------------------------ route helpers

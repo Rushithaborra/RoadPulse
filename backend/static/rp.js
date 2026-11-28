@@ -56,7 +56,6 @@ window.RP = (() => {
     if (o.report) out.push(`${o.report} driver report${o.report > 1 ? "s say" : " says"} there is a problem here`);
     if (o.probe) out.push("Traffic data: many vehicles here are moving very slowly");
     if (o.sensor) out.push(`Water sensor reads ${i.depth_cm != null ? Math.round(i.depth_cm) + " cm" : "water on the road"}`);
-    if (o.cctv) out.push("A camera sees the problem");
     if (o.planned) out.push("Planned by the agency doing the work");
     if (o.field) out.push("Traffic police on the scene confirmed it");
     if (o.officer) out.push("A control-room officer confirmed it");

@@ -126,12 +126,27 @@ function activeDetail(i) {
   const helpRow = ["ambulance", "tow"].map((u) => sent[u] ? `<span class="chip done">${U[u]} sent ${clock(sent[u])}</span>` : `<button class="btn-sm ghost" data-act="dispatch" data-id="${i.id}" data-unit="${u}">Send ${U[u].toLowerCase()}</button>`).join("");
   return `<div class="stack"><div class="row" style="flex-wrap:nowrap;gap:12px"><span class="ico" style="--c:${s.color};width:50px;height:50px">${icon(KIND[i.type].ic, 26)}</span><div><h2>${esc(headline(i))}</h2><div class="small" style="--c:${s.color}">${meter(i.severity)} <span class="lvl">${s.label}</span> · <b>${i.people_warned || 0}</b> drivers warned ${i.urgent ? '<span class="chip warnc">urgent</span>' : ""}</div></div></div>
     <div class="todo" style="--c:${s.color}"><small>Drivers are told</small>${esc(s.advice)}</div>
+    ${i.status === "Verified" ? `<button class="btn-big" data-act="respond" data-id="${i.id}">Approve diversion: send drivers the way round</button>` : ""}
+    ${i.status === "Responding" ? '<div class="hero ok"><span class="ic">' + icon("nav", 24) + '</span><div><b>Diversion approved</b>Drivers on this road are being sent the way round.</div></div>' : ""}
+    ${recovery(i)}
     ${i.field_state === "open" ? `<div class="hero ok"><span class="ic">${icon("road", 24)}</span><div><b>Police say the road is open</b>You can clear it now.</div></div><button class="btn-big good" data-act="clear" data-id="${i.id}">Clear road: tell drivers it's open</button>` : ""}
     ${reqs.length ? `<div class="hero warn"><span class="ic">${icon("shield", 24)}</span><div><b>Police need: ${reqs.map((r) => r.kind).join(" and ")}</b>Tap below to send.</div></div>` : ""}
     <div><b class="small muted">HELP</b><div class="row" style="margin-top:6px">${helpRow}</div></div>
     ${changeable ? `<div><b class="small muted">CHANGE LEVEL</b><div class="grid2" style="margin-top:6px">${["Closed", "Severe", "Medium", "Low"].filter((k) => k !== i.severity).map((k) => tile(k, false, "level", i.id)).join("")}</div></div>` : ""}
     ${i.field_state !== "open" ? `<button class="btn-big ghost" data-act="clear" data-id="${i.id}">The road is clear again</button>` : ""}
-    ${timeline(i)}</div>`;
+    ${alertHistory(d)}${timeline(i)}</div>`;
+}
+// Recovery monitoring: the engine only starts the auto-clear countdown when the evidence says the road is back to normal.
+function recovery(i) {
+  if (i.clearing_in_s == null || i.status === "Cleared") return "";
+  const water = i.type === "flood" && i.depth_cm != null ? ` Water is down to about ${Math.round(i.depth_cm)} cm.` : "";
+  return `<div class="hero ok" data-recovery><span class="ic">${icon("check", 24)}</span><div><b>Looks like it is recovering</b>Readings are back to normal.${water} It clears by itself in ${i.clearing_in_s} s, or you can clear it now.</div></div>`;
+}
+// Notification history: anonymous on purpose (no names, no places): when, which kind of message, and whether Telegram carried it.
+const ALERT_LABEL = { pre_trip: "Warned before the trip", in_trip: "Warned on the road", uturn: "Told to turn back", no_alternative: "Warned: no way round", clear: "All-clear sent", route_change: "Route changed" };
+function alertHistory(d) {
+  const h = d.alert_history || []; if (!h.length) return `<div data-alerts><b class="small muted" style="text-transform:uppercase;letter-spacing:.06em">Warnings sent</b><p class="small muted" style="margin:6px 0 0">None yet. Nobody signed up for alerts has this road on their route.</p></div>`;
+  return `<div data-alerts><b class="small muted" style="text-transform:uppercase;letter-spacing:.06em">Warnings sent (${h.length})</b><div class="stack" style="margin-top:6px;gap:0">${h.slice(-8).map((a) => `<div class="row" style="flex-wrap:nowrap;gap:10px;padding:5px 0;border-bottom:1px solid var(--line)"><span class="small muted" style="min-width:48px">${clock(a.ts)}</span><span>${esc(ALERT_LABEL[a.kind] || a.kind.replace(/_/g, " "))}${a.telegram ? " · Telegram" : ""}</span></div>`).join("")}</div></div>`;
 }
 function detailView() {
   const i = state.incidents.find((x) => x.id === state.selected); if (!i) { state.selected = null; return queueView(); }
@@ -173,6 +188,7 @@ $("body").addEventListener("click", async (e) => {
     if (act === "assign") { await api(`/api/incidents/${id}/assign`, { method: "POST", body: JSON.stringify({ unit: a.dataset.unit }) }); toast(`${a.dataset.unit} is being sent to check.`); }
     else if (act === "confirm") { await api(`/api/incidents/${id}/verify`, { method: "POST", body: JSON.stringify(a.dataset.sev ? { severity: a.dataset.sev } : {}) }); toast("Confirmed. Drivers whose route is affected are being warned now."); state.selected = null; }
     else if (act === "urgent") { await api(`/api/incidents/${id}/verify`, { method: "POST", body: JSON.stringify({ severity: a.dataset.sev, urgent: true, reason: "urgent, no police check" }) }); toast("Drivers are being warned now. Recorded as urgent."); state.selected = null; }
+    else if (act === "respond") { await api(`/api/incidents/${id}/respond`, { method: "POST", body: "{}" }); toast("Diversion approved. Drivers are sent the way round."); await loadDetail(state.incidents.find((x) => x.id === id), true); }
     else if (act === "level") { await api(`/api/incidents/${id}/verify`, { method: "POST", body: JSON.stringify({ severity: a.dataset.sev }) }); toast(`Updated to ${SEV[a.dataset.sev].label.toLowerCase()}.`); }
     else if (act === "reject") { await api(`/api/incidents/${id}/reject`, { method: "POST", body: "{}" }); toast("Dismissed. Drivers were never told."); state.selected = null; }
     else if (act === "clear") { await api(`/api/incidents/${id}/clear`, { method: "POST", body: "{}" }); toast("Road marked clear. Everyone who was warned is told."); state.selected = null; }
@@ -189,7 +205,8 @@ async function refresh(force) {
     if (force || sig !== state.sig) {
       if (state.seen) { const fresh = r.incidents.filter((i) => i.status === "Reported" && !state.seen.has(i.id)); fresh.forEach((i) => toast(`New report to check: ${headline(i)}.`)); if (fresh.length && state.sound) beep(); }
       state.seen = new Set(r.incidents.map((i) => i.id)); state.incidents = r.incidents; state.sig = sig;
-      await Promise.all(open().map((i) => loadDetail(i))); const sel = state.incidents.find((x) => x.id === state.selected); if (sel) await loadUnits(sel);
+      await Promise.all(open().map((i) => loadDetail(i))); const sel = state.incidents.find((x) => x.id === state.selected);
+      if (sel) { await loadDetail(sel, true); await loadUnits(sel); }   // the warnings list can grow without the incident itself changing
       renderAll();
       if (!state.fitted && open().length) { state.fitted = true; map.fitBounds(L.latLngBounds(open().map((i) => [i.lat, i.lon])), { paddingTopLeft: [460, 90], paddingBottomRight: [60, 60], maxZoom: 17 }); }
     } else renderCounts();

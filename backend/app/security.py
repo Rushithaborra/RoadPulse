@@ -70,7 +70,8 @@ def _unb64(s: str) -> bytes:
 
 def issue_token(username: str, password: str) -> dict | None:
     user = _users().get(username)
-    if not user or not hmac.compare_digest(user[0], password):
+    # compare as bytes: hmac.compare_digest raises TypeError on a str with non-ASCII characters (a 500 for the caller)
+    if not user or not hmac.compare_digest(user[0].encode("utf-8"), (password or "").encode("utf-8")):
         return None
     payload = {"sub": username, "role": user[1], "exp": int(time.time()) + TOKEN_TTL_S}
     body = _b64(json.dumps(payload).encode())
@@ -149,6 +150,7 @@ REPORT_LIMIT = RateLimiter(rate_per_min=float(os.getenv("REPORT_RATE_PER_MIN", 6
 DEVICE_LIMIT = RateLimiter(rate_per_min=float(os.getenv("DEVICE_RATE_PER_MIN", 600)), burst=100)
 SUBSCRIBE_LIMIT = RateLimiter(rate_per_min=float(os.getenv("SUBSCRIBE_RATE_PER_MIN", 10)), burst=5)
 ROUTE_LIMIT = RateLimiter(rate_per_min=float(os.getenv("ROUTE_RATE_PER_MIN", 120)), burst=30)
+EVAL_LIMIT = RateLimiter(rate_per_min=float(os.getenv("EVAL_RATE_PER_MIN", 6)), burst=3)
 
 
 def client_ip(request: Request) -> str:
