@@ -23,7 +23,7 @@ from .models import (CitizenReport, Dispatch, Severity, Incident, PlannedWork, P
 from .models import AssignIn, CallStatusIn, FieldReportIn, PlacesIn, UnitPositionIn
 from .roadgraph import RoadGraph
 from .routing import incident_effects, route_alternatives
-from .security import (DEVICE_LIMIT, REPORT_LIMIT, ROUTE_LIMIT, SUBSCRIBE_LIMIT, consume_stream_ticket, issue_stream_ticket,
+from .security import (DEVICE_LIMIT, EVAL_LIMIT, REPORT_LIMIT, ROUTE_LIMIT, SUBSCRIBE_LIMIT, consume_stream_ticket, issue_stream_ticket,
                        issue_token, limit, optional_officer, police_units, require_device, require_officer, require_police)
 from .store import store
 
@@ -135,7 +135,10 @@ async def lifespan(app: FastAPI):
     S.db.close()
 
 
-app = FastAPI(title="RoadPulse API", version="0.1.0", lifespan=lifespan)
+# The interactive API reference (/docs, /openapi.json) is on by default; set API_DOCS=0 to hide it on a public server.
+_docs_on = os.getenv("API_DOCS", "1") != "0"
+app = FastAPI(title="RoadPulse API", version="0.1.0", lifespan=lifespan,
+              docs_url="/docs" if _docs_on else None, redoc_url=None, openapi_url="/openapi.json" if _docs_on else None)
 
 
 from fastapi.exceptions import RequestValidationError  # noqa: E402
@@ -167,6 +170,15 @@ async def request_log(request: Request, call_next):
     p = request.url.path
     if p in ("/", "/classic", "/commute", "/board", "/control", "/police") or p.startswith("/static/"):
         resp.headers["Cache-Control"] = "no-cache"  # revalidate (ETag) so a redeployed UI is never served stale
+    elif p.startswith(("/api/subscribers", "/api/auth", "/api/police", "/api/stream/ticket", "/api/audit")):
+        resp.headers["Cache-Control"] = "no-store"  # private data and tokens must not sit in any browser or proxy cache
+    # Safe-by-default headers that cannot break the apps (no script or style restrictions, so the map tiles and the
+    # inline page scripts keep working). Referrer stays on the default: OpenStreetMap's tile policy needs a Referer.
+    resp.headers.setdefault("X-Content-Type-Options", "nosniff")
+    resp.headers.setdefault("X-Frame-Options", "DENY")
+    resp.headers.setdefault("Content-Security-Policy", "frame-ancestors 'none'; base-uri 'self'; object-src 'none'; form-action 'self'")
+    resp.headers.setdefault("Permissions-Policy", "geolocation=(self), camera=(), microphone=()")
+    resp.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
     return resp
 
 
@@ -203,6 +215,9 @@ def incident_view(inc: Incident, detail: bool = False) -> dict:
     }
     if detail:
         d["signals"] = [s.model_dump() for s in inc.signals[-20:]]
+        # who was warned is deliberately anonymous: when, what kind of message and whether Telegram carried it
+        d["alert_history"] = [{"ts": a["ts"], "kind": a["kind"], "telegram": a["telegram"]}
+                              for a in reversed([a for a in store.alert_log if a["incident_id"] == inc.id][:50])]
         d["dispatched"] = inc.dispatched
         d["assignments"] = inc.assignments
         d["field_reports"] = inc.field_reports
@@ -444,7 +459,8 @@ def feed():
 
 
 @app.get("/api/evaluation")
-def evaluation(trips: int = Query(400, ge=50, le=2000), seed: int = 7):
+def evaluation(request: Request, trips: int = Query(400, ge=50, le=2000), seed: int = 7):
+    limit(EVAL_LIMIT, "evaluation", request)   # public and CPU-heavy: one caller must not be able to hammer it
     incs = active_published()
     if not incs:
         raise HTTPException(409, "No active verified incident to evaluate; run the demo scenario first")

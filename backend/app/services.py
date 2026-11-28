@@ -46,7 +46,8 @@ def handle_report(store: Store, r: CitizenReport, road: str | None = None) -> In
     # fixed weight: an unauthenticated reporter id cannot buy extra trust
     sig = Signal(source="report", type=r.type, lat=r.lat, lon=r.lon,
                  weight=config.SOURCE_WEIGHTS["report"], source_id=r.reporter_id, note=r.note, simulated=r.simulated)
-    place = _hotspot_name_near(store, r.lat, r.lon) or road
+    # only a flood report is named after a flood-watch point; an accident 150 m away must not be titled "Demo hotspot A"
+    place = (_hotspot_name_near(store, r.lat, r.lon) if r.type == "flood" else None) or road
     hs = _hotspot_id_near(store, r.lat, r.lon) if r.type == "flood" else None
     return ingest(store, sig, place=place, hotspot_id=hs)
 

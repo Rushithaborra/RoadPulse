@@ -1,7 +1,8 @@
 "use strict";
 // Commuter app: see what is wrong, check my trip, get a way round. One card at a time, almost no words.
 const { $, esc, clock, icon, KIND, SEV, SEV_RANK, meter, published, headline, reason, vehicleNote, toast, api, makeMap, drawIncidents, makeSheet, pinHtml } = RP;
-const state = { incidents: [], sig: "", seen: null, view: "overview", selected: null, A: null, B: null, report: { type: "accident", pt: null }, vehicle: RP.store.get("rp_vehicle") || "car",
+const loadMine = () => { try { return JSON.parse(RP.store.get("rp_mine") || "[]"); } catch (e) { return []; } };
+const state = { mine: loadMine(), lastPoll: 0, incidents: [], sig: "", seen: null, view: "overview", selected: null, A: null, B: null, report: { type: "accident", pt: null, note: "" }, vehicle: RP.store.get("rp_vehicle") || "car",
                 connected: false, lastOk: 0, fitted: false, center: [17.7287, 83.3086], trip: null, An: null, Bn: null, loaded: false, search: { field: "to", results: [] } };
 
 const M = makeMap(state.center), map = M.map, L_ = M.layers;
@@ -40,9 +41,31 @@ function probCard(i) {
 function overview() {
   if (!state.loaded) return '<div class="stack"><div class="skel"></div><div class="skel"></div><div class="skel"></div></div>';
   const list = worst();
-  return `<div class="stack">${hero()}${list.length ? `<div class="stack">${list.map(probCard).join("")}</div>` : ""}
+  return `<div class="stack">${hero()}${list.length ? `<div class="stack">${list.map(probCard).join("")}</div>` : ""}${myReports()}
     <div class="card row spread"><div class="row" style="flex-wrap:nowrap"><span style="color:var(--brand)">${icon("bell", 24)}</span><div><b>Get warned on your phone</b><div class="small muted">Only if a problem is on your route.</div></div></div><a class="btn-sm" href="/commute">Set up</a></div>
     <p class="small muted" style="text-align:center">Staff: <a class="link" href="/control">Control room</a> · <a class="link" href="/police">Traffic police</a></p></div>`;
+}
+// ------------------------------------------------------------------ "Your reports": follow each report to its outcome
+const OUTCOME = { pending: ["Waiting for a check", "Traffic police and the control room check every report before other drivers are warned."],
+  published: ["Confirmed", "Checked and confirmed. Drivers whose route is affected are being warned."], rejected: ["Not confirmed", "It was checked and no problem was found, so nobody was warned."],
+  resolved: ["Resolved", "The road is clear again."], gone: ["No longer tracked", "The server no longer has this report."] };
+function myReports() {
+  if (!state.mine.length) return "";
+  return `<div class="card stack" data-my-reports><b>Your reports</b>${state.mine.map((r) => { const [t, why] = OUTCOME[r.outcome] || OUTCOME.gone;
+    return `<div class="row" style="flex-wrap:nowrap;gap:10px" data-report-status="${esc(r.outcome)}"><span class="ico">${icon(KIND[r.type] ? KIND[r.type].ic : "warn", 20)}</span><div class="grow"><b>${esc((KIND[r.type] || KIND.slowdown).name)}</b> <span class="chip ${r.outcome === "pending" ? "warnc" : "done"}">${esc(t)}</span><div class="small muted">${esc(why)}</div></div></div>`; }).join("")}</div>`;
+}
+const saveMine = () => RP.store.set("rp_mine", JSON.stringify(state.mine.slice(0, 6)));
+async function pollMine(force) {
+  const open = state.mine.filter((r) => r.outcome === "pending" || r.outcome === "published");
+  if (!open.length || (!force && Date.now() - state.lastPoll < 5000)) return;
+  state.lastPoll = Date.now(); let changed = false;
+  for (const r of open) {
+    try { const s = await api(`/api/reports/${encodeURIComponent(r.id)}/status`); if (s.outcome !== r.outcome) { r.outcome = s.outcome; changed = true;
+      if (s.outcome === "published") toast("Your report was confirmed. Drivers are being warned.");
+      else if (s.outcome === "rejected") toast("Your report was checked: no problem was found."); } }
+    catch (e) { if (/not found/i.test(e.message)) { r.outcome = "gone"; changed = true; } }
+  }
+  if (changed) { saveMine(); if (state.view === "overview") renderSheet(); }
 }
 function problemView() {
   const i = state.incidents.find((x) => x.id === state.selected); if (!i) { state.view = "overview"; return overview(); }
@@ -88,6 +111,7 @@ let tSearch;
 async function searchPlaces(q) { try { state.search.results = (await api(`/api/places?q=${encodeURIComponent(q)}&limit=8`)).places; } catch (e) { state.search.results = []; } const el = $("results"); if (el) el.innerHTML = resultsHtml(); }
 function openSearch() { setView("search"); sheet.set(2); searchPlaces(""); setTimeout(() => { const el = $(state.A ? "q-to" : "q-to"); if (el) el.focus(); }, 80); }
 $("body").addEventListener("input", (e) => { const f = e.target.dataset && e.target.dataset.f; if (!f) return; state.search.field = f; clearTimeout(tSearch); tSearch = setTimeout(() => searchPlaces(e.target.value), 150); });
+$("body").addEventListener("input", (e) => { if (e.target.id === "report-note") state.report.note = e.target.value; });
 $("body").addEventListener("focusin", (e) => { const f = e.target.dataset && e.target.dataset.f; if (f) { state.search.field = f; sheet.set(2); } });
 function fitTrip() { map.fitBounds(L.latLngBounds([state.A, state.B]), { paddingTopLeft: [60, 110], paddingBottomRight: [60, sheet.phone() ? innerHeight * 0.52 : 60], maxZoom: 17 }); }
 function pickPlace(k) { const p = state.search.results[k]; if (p) applyPlace(p); }
@@ -111,6 +135,7 @@ function reportView() {
   return `<div class="stack"><div class="row spread"><h2>Report a problem</h2><button class="link" data-act="back">Cancel</button></div>
     <div class="grid2">${types.map(([k, n, ic]) => `<button class="tile ${state.report.type === k ? "on" : ""}" style="--c:var(--brand)" data-rtype="${k}">${icon(ic, 26)}${n}</button>`).join("")}</div>
     <div class="card row" style="flex-wrap:nowrap"><span style="color:var(--brand)">${icon("pin", 22)}</span><b>${state.report.pt ? "Spot chosen on the map" : "Tap the spot on the map"}</b></div>
+    <input id="report-note" maxlength="200" placeholder="What did you see? (optional)" aria-label="Describe what you saw" value="${esc(state.report.note || "")}" autocomplete="off">
     <button class="btn-big" id="send-report" ${state.report.pt ? "" : "disabled"}>Send report</button>
     <p class="small muted" style="margin:0">Traffic police check every report before other drivers are warned.</p></div>`;
 }
@@ -188,8 +213,10 @@ function tripCard(r) {
 async function sendReport() {
   const b = $("send-report"); b.disabled = true;
   let uid = RP.store.get("rp_uid"); if (!uid) { uid = Math.random().toString(36).slice(2, 10); RP.store.set("rp_uid", uid); }
-  try { await api("/api/reports", { method: "POST", body: JSON.stringify({ type: state.report.type, lat: state.report.pt[0], lon: state.report.pt[1], reporter_id: "web-" + uid }) });
-    toast("Thank you. Traffic police will check it before drivers are warned."); state.report.pt = null; L_.pins.clearLayers(); setView("overview"); }
+  try { const note = ($("report-note") ? $("report-note").value : state.report.note || "").trim();
+    const r = await api("/api/reports", { method: "POST", body: JSON.stringify({ type: state.report.type, lat: state.report.pt[0], lon: state.report.pt[1], reporter_id: "web-" + uid, note: note || null }) });
+    state.mine.unshift({ id: r.incident_id, type: state.report.type, at: Date.now(), outcome: r.status === "Reported" ? "pending" : "published" }); state.mine = state.mine.slice(0, 6); saveMine();
+    toast(r.status === "Reported" ? "Thank you. Traffic police will check it before drivers are warned." : "Thank you. This matches a confirmed problem."); state.report.pt = null; state.report.note = ""; L_.pins.clearLayers(); setView("overview"); }
   catch (e) { toast(e.message); b.disabled = false; }
 }
 $("btn-report").onclick = () => { setView("report"); sheet.set(0); toast("Tap the spot on the map."); };
@@ -225,5 +252,5 @@ async function refresh(force) {
 document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh(true); });   // save battery and data in the background
 (async function start() {
   try { const h = await api("/api/health"); if (h.center) { state.center = h.center; map.setView(h.center, 16); } } catch (e) { /* offline */ }
-  renderPill(); renderSheet(); await refresh(true); setInterval(() => { if (!document.hidden) refresh(); }, 2500);
+  renderPill(); renderSheet(); await refresh(true); pollMine(true); setInterval(() => { if (!document.hidden) { refresh(); pollMine(); } }, 2500);
 })();

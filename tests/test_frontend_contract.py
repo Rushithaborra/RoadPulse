@@ -14,7 +14,7 @@ def read(name):
 
 # ids a script creates itself (inside its own templates) rather than finding in the page
 PAGES = [("classic.html", "app.js", {"btn-retry"}),
-         ("index.html", "commuter.js", {"send-report", "q-from", "q-to", "results"}),
+         ("index.html", "commuter.js", {"send-report", "q-from", "q-to", "results", "report-note"}),
          ("control.html", "control.js", {"user", "pass", "btn-login", "live"}),
          ("police.html", "police.js", {"user", "pass", "btn-login", "note"})]
 
