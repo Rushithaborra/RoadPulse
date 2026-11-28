@@ -101,6 +101,12 @@ function unitRows(i) {
   return u.map((x) => `<div class="unit"><span style="color:var(--brand)">${icon("shield", 22)}</span><div class="grow"><b>${esc(x.unit)}</b><div class="small muted">${x.metres != null ? `${x.eta_min} min away · ${x.metres} m` : "location not shared"}${x.calls ? ` · ${x.calls} call${x.calls > 1 ? "s" : ""}` : ""}</div></div>
     <button class="btn-sm" data-act="assign" data-id="${i.id}" data-unit="${esc(x.unit)}">Send</button></div>`).join("");
 }
+// The evidence behind an incident in plain words, and how sure the system is. Simulated evidence is labelled as such.
+function why(i) {
+  const ev = evidence(i), pct = Math.round((i.confidence || 0) * 100);
+  return `<div data-evidence><b>Why we think so</b><ul style="margin:6px 0 0 18px;padding:0">${ev.map((e) => `<li>${esc(e)}</li>`).join("") || "<li>No evidence recorded yet.</li>"}</ul>
+    <div class="small muted" data-confidence style="margin-top:4px">How sure the system is: ${pct}%${i.simulated ? ' · <span class="demo">demo data</span>' : ""}</div></div>`;
+}
 function pendingDetail(i) {
   const d = state.detail[i.id] || {}, fs = i.field_state, s = SEV[i.field_severity || i.severity], ev = evidence(i), reps = d.field_reports || [];
   const last = reps[reps.length - 1];
@@ -116,7 +122,7 @@ function pendingDetail(i) {
        <details style="margin-top:8px"><summary class="small" style="cursor:pointer;color:var(--bad);font-weight:700">Emergency? Warn drivers now</summary><div class="grid2" style="margin-top:8px">${["Closed", "Severe", "Medium", "Low"].map((k) => tile(k, false, "urgent", i.id)).join("")}</div>
        <p class="small muted">Recorded as urgent without a police check.</p></details></div>`;
   return `<div class="stack"><div class="row" style="flex-wrap:nowrap;gap:12px"><span class="ico" style="--c:${SEV[i.severity].color};width:50px;height:50px">${icon(KIND[i.type].ic, 26)}</span><div><h2>${esc(headline(i))}</h2><span class="chip warnc">Not shown to drivers yet</span>${i.simulated ? ' <span class="demo">demo</span>' : ""}</div></div>
-    ${stepper(i)}<div><b>Why we think so</b><ul style="margin:6px 0 0 18px;padding:0">${ev.map((e) => `<li>${esc(e)}</li>`).join("")}</ul></div>${police}${decide}
+    ${stepper(i)}${why(i)}${police}${decide}
     ${timeline(i)}<button class="btn-big ghost" data-act="reject" data-id="${i.id}">Not real: dismiss</button></div>`;
 }
 function activeDetail(i) {
@@ -126,6 +132,7 @@ function activeDetail(i) {
   const helpRow = ["ambulance", "tow"].map((u) => sent[u] ? `<span class="chip done">${U[u]} sent ${clock(sent[u])}</span>` : `<button class="btn-sm ghost" data-act="dispatch" data-id="${i.id}" data-unit="${u}">Send ${U[u].toLowerCase()}</button>`).join("");
   return `<div class="stack"><div class="row" style="flex-wrap:nowrap;gap:12px"><span class="ico" style="--c:${s.color};width:50px;height:50px">${icon(KIND[i.type].ic, 26)}</span><div><h2>${esc(headline(i))}</h2><div class="small" style="--c:${s.color}">${meter(i.severity)} <span class="lvl">${s.label}</span> · <b>${i.people_warned || 0}</b> drivers warned ${i.urgent ? '<span class="chip warnc">urgent</span>' : ""}</div></div></div>
     <div class="todo" style="--c:${s.color}"><small>Drivers are told</small>${esc(s.advice)}</div>
+    ${why(i)}
     ${i.status === "Verified" ? `<button class="btn-big" data-act="respond" data-id="${i.id}">Approve diversion: send drivers the way round</button>` : ""}
     ${i.status === "Responding" ? '<div class="hero ok"><span class="ic">' + icon("nav", 24) + '</span><div><b>Diversion approved</b>Drivers on this road are being sent the way round.</div></div>' : ""}
     ${recovery(i)}
@@ -140,7 +147,8 @@ function activeDetail(i) {
 function recovery(i) {
   if (i.clearing_in_s == null || i.status === "Cleared") return "";
   const water = i.type === "flood" && i.depth_cm != null ? ` Water is down to about ${Math.round(i.depth_cm)} cm.` : "";
-  return `<div class="hero ok" data-recovery><span class="ic">${icon("check", 24)}</span><div><b>Looks like it is recovering</b>Readings are back to normal.${water} It clears by itself in ${i.clearing_in_s} s, or you can clear it now.</div></div>`;
+  const mins = Math.max(1, Math.ceil(i.clearing_in_s / 60));
+  return `<div class="hero ok" data-recovery><span class="ic">${icon("check", 24)}</span><div><b>Looks like it is recovering</b>Readings are back to normal.${water} It clears by itself in about ${mins} min if they stay normal, or you can clear it now.</div></div>`;
 }
 // Notification history: anonymous on purpose (no names, no places): when, which kind of message, and whether Telegram carried it.
 const ALERT_LABEL = { pre_trip: "Warned before the trip", in_trip: "Warned on the road", uturn: "Told to turn back", no_alternative: "Warned: no way round", clear: "All-clear sent", route_change: "Route changed" };
@@ -201,7 +209,8 @@ async function refresh(force) {
   if (!signedIn()) return;            // never redraw the sign-in form: it would wipe what is being typed
   try {
     const r = await api("/api/incidents?scope=all"); state.lastOk = Date.now(); state.connected = true;
-    const sig = JSON.stringify(r.incidents.map((i) => [i.id, i.status, i.severity, i.updated, i.people_warned, i.field_state]));
+    // a boolean for "recovering", not the countdown itself: redrawing every poll would wipe a half-finished two-tap action
+    const sig = JSON.stringify(r.incidents.map((i) => [i.id, i.status, i.severity, i.updated, i.people_warned, i.field_state, i.clearing_in_s != null]));
     if (force || sig !== state.sig) {
       if (state.seen) { const fresh = r.incidents.filter((i) => i.status === "Reported" && !state.seen.has(i.id)); fresh.forEach((i) => toast(`New report to check: ${headline(i)}.`)); if (fresh.length && state.sound) beep(); }
       state.seen = new Set(r.incidents.map((i) => i.id)); state.incidents = r.incidents; state.sig = sig;
