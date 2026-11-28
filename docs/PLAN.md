@@ -1,6 +1,10 @@
 # RoadPulse — Phase 0 plan (one page)
 
-Full design rationale: "RoadPulse — System Architecture Design v0.1" (team doc). This page is the build contract.
+Full design rationale: "RoadPulse — System Architecture Design v0.1" (team doc). This page was the build contract.
+
+> **Status (28 Nov 2026):** this is the original plan. The delivered system is described by `README.md`,
+> `docs/ARCHITECTURE.md` and `docs/API.md`, which supersede the endpoint table and decisions below (alert subscribers,
+> police and control-room apps, boards and the two-stage check were added after this page was written).
 
 ## 1. MVP scope (must demo)
 Report → assess → identify affected road → alternative route → dashboard updates.

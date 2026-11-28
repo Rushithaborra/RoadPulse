@@ -19,7 +19,6 @@ GRAPHML_PATH = os.getenv("GRAPHML_PATH", os.path.join(os.path.dirname(__file__),
 CLUSTER_RADIUS_M = _f("CLUSTER_RADIUS_M", 300)
 CLUSTER_WINDOW_S = _f("CLUSTER_WINDOW_S", 15 * 60)
 PUBLISH_CONFIDENCE = _f("PUBLISH_CONFIDENCE", 0.7)   # shown to commuters + used in routing
-REVIEW_CONFIDENCE = _f("REVIEW_CONFIDENCE", 0.4)     # shown to officers as "unverified"
 
 # Sources that authenticate (device key, officer token, agency entry). Public reports are NOT trusted:
 # their reporter_id is client-supplied, so any number of reports counts as one untrusted source.

@@ -1,26 +1,35 @@
 # RoadPulse
 
-Low-cost, real-time road disruption detection and vehicle-aware rerouting.
-A road disruption is reported → the incident is assessed → the affected road is identified →
-an alternative route is calculated → the authority dashboard updates, live.
+Road disruption detection and vehicle-aware rerouting for Visakhapatnam. A road disruption is reported, assessed,
+verified, mapped and used to reroute commuters, while the traffic authority and police manage it, live.
 
-Hackathon prototype (AITAM virtual hackathon, Problem #3). Demo area: Dwaraka Nagar, Visakhapatnam
-(17.728670 N, 83.308634 E). Plan and contracts: [`docs/PLAN.md`](docs/PLAN.md).
+Virtual hackathon project (AITAM, Problem #3). Pilot area: **Dwaraka Nagar and the RTC Complex (Dwaraka Bus Station)**
+on real OpenStreetMap roads. This is a **software-only** delivery: no hardware is needed or claimed.
 
-Road data and map tiles © [OpenStreetMap contributors](https://www.openstreetmap.org/copyright), available under the
-Open Database Licence (ODbL). The attribution is shown on the map and must stay visible.
+## What is real, what is simulated
 
-## Run it (2 minutes)
+| Real | Simulated (and labelled SIMULATED in every app) |
+|---|---|
+| The OpenStreetMap road graph (5,310 nodes, 10,345 directed edges, one-way streets kept) and the routing on it | Water depth, rain and the water sensor in the demo |
+| The verification rules, the incident lifecycle, the two-stage police check | Speed probes (vehicles) in the demo |
+| Route-based alerts, pre-trip and in-trip warnings, the all-clear | The two flood-watch points (simulated points on real roads, not known flood spots) |
+| The commuter, control-room and police apps, and the live updates | The roadside boards (a web page that shows what a board would display) |
+| 179 automated tests, 21 of them in a real browser | The assumed safe water depth per vehicle (two-wheeler 10 cm, auto 20, car 30, ambulance 30, bus 45): demo values, **not safety guidance** |
 
-There is one server: it serves the API and the web interface (plain HTML/JS, no build step), so there is no separate
-frontend command. Python 3.12 or newer.
+**Not built:** camera or YOLO detection, a trained prediction model, control of traffic signals (the signal output is advice
+for an officer), real traffic feeds, Telegram tested against a live bot, the ESP32 sensor hardware (a sketch exists in
+`firmware/` but is not part of this delivery and was never run on hardware).
+
+## Run it (5 minutes, fresh machine)
+
+Python 3.12 or newer. No Node.js. One server serves the API and every app.
 
 **Windows (PowerShell)**
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1         # the leading .\ is required; if blocked: Set-ExecutionPolicy -Scope Process Bypass
 pip install -r requirements-dev.txt
-Copy-Item .env.example .env          # then edit the passwords and keys in .env
+Copy-Item .env.example .env          # then edit the logins, keys and secret in .env
 uvicorn app.main:app --app-dir backend --env-file .env --no-access-log --timeout-graceful-shutdown 3
 ```
 
@@ -28,233 +37,96 @@ uvicorn app.main:app --app-dir backend --env-file .env --no-access-log --timeout
 ```bash
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements-dev.txt
-cp .env.example .env                 # then edit the passwords and keys
+cp .env.example .env                 # then edit the logins, keys and secret
 uvicorn app.main:app --app-dir backend --env-file .env --no-access-log --timeout-graceful-shutdown 3
 ```
-Open http://localhost:8000. Officer login uses `OFFICER_USERS` from `.env` (the example file has `change-me`
-placeholders: change them before sharing the server). If `OFFICER_USERS` or `DEVICE_KEYS` is missing, the server
-generates random ones for that run and prints them in its log.
 
-With Docker: `cp .env.example .env && docker compose up --build`
+Open **http://localhost:8000**. Check `http://localhost:8000/api/health`: it must say `"map_mode":"osm"` and
+`"map_warning":null`. If `data/area.graphml` is missing or cannot be loaded, the server falls back to a synthetic grid and
+**every app shows a red warning**: it is never silent. Docker: `docker compose up --build` (see `docs/DEPLOY.md`).
 
-If the page ever looks out of date after an update, hard-reload it (Ctrl+Shift+R); the server asks browsers to
-revalidate, so this is only needed once.
+## The apps
 
-## Three apps for three people
-
-| App | Who | What it does |
+| Address | Who | What it does |
 |---|---|---|
-| `/` | Commuters | Map-first: see problems, check a trip, get a way round, report. Plain words: what is wrong, how serious, what to do. |
-| `/control` | Control room | A queue of reports. Send the nearest police unit, see what police found, confirm with one tap, send ambulance or tow, clear. |
-| `/police` | Traffic police in the field | Get a call, accept, travel, arrive, report what you SEE (blocked, one lane, not real), ask for an ambulance or tow, say the road is open. Phone first. |
+| `/` | Commuters | Map-first. Search or tap a start and a destination, get a route on real roads, a clear card when a road is affected (usual way dashed red, better way green), a "See a way round" button, a report form, and **Your reports** which follows each report to its outcome. Updates by itself. |
+| `/commute` | Subscribers | Sign up for alerts (consent first), saved home and work, a planned departure, a simulated drive, spoken alerts, an inbox, **Delete my data**. |
+| `/board?id=` | People with no app | A **simulated** roadside board: what to avoid and which way to use, or ROAD CLEAR. |
+| `/control` | Control room | Queue of reports, the evidence and how sure the system is, send the nearest police unit, confirm, **Approve diversion**, recovery monitoring, clear, anonymous history of warnings sent. |
+| `/police` | Traffic police | Phone-first: get a call, accept, travel, arrive, report what you see, ask for an ambulance or tow, say the road is open. Works through a weak signal. |
+| `/classic` | Officers | The detailed dashboard: planned works, what-if, signal-timing advice, bulletin draft, before/after evaluation. Uses the live SSE stream. |
+| `/docs` | Developers | Interactive API reference (hide on a public server with `API_DOCS=0`). |
 
-A citizen report is checked twice before drivers are warned: **police on the ground, then the control room**. The control
-room can fast-track a real emergency as *urgent* (recorded). Sensors, cameras and planned works are already trusted and
-skip the police step. Set `REQUIRE_FIELD_CONFIRMATION=0` to turn the police step off. Every app has a **Map / Satellite**
-switch (satellite imagery © Esri, Maxar, Earthstar Geographics; needs internet and follows Esri's terms of use).
-Staff logins: `OFFICER_USERS` (control room) and `POLICE_USERS` (police), in `.env`. The original detailed dashboard is at `/classic`.
+## The rules that matter
 
-## What the interface shows (detailed view)
+- A citizen report **alone never publishes**, however many arrive. Speed probes alone never publish either: they only raise a "suspected slowdown" for officers.
+- Publishing needs confidence of 0.7 **and** a trusted source (water sensor, planned works or an officer). Citizen reports of accidents and blockages also need **police on the scene, then the control room** (the control room is refused with HTTP 409 until police have checked); the only shortcut is **urgent**, which is recorded in the audit log.
+- Commuters and routing only ever see published incidents. A cleared or expired incident stops affecting routes, the public feed, boards and alerts immediately, and everyone who was warned gets an all-clear.
 
-- **Map:** real OpenStreetMap roads of the pilot area (Dwaraka Nagar and the RTC Complex / Dwaraka Bus Station, both
-  inside the loaded map; "Jump to" buttons and labels mark them). A collapsible **Map legend** explains every colour
-  and symbol. If `data/area.graphml` is missing or cannot be loaded, the server falls back to a synthetic grid and
-  the page shows a red **MAP WARNING** banner and a "SYNTHETIC grid: not real roads" badge; it is never silent
-  (`/api/health` and `/api/network` carry `map_warning`).
-- **Commuter:** click A then B for a route that follows real roads; verified incidents colour the affected roads by
-  severity, roads blocked for your chosen vehicle get a black dotted overlay, and the route changes live when an
-  incident is verified, changes or is resolved. Only verified incidents are shown or used.
-- **Report a problem:** choose the type, describe it, pick the location on the map, send. A public report is never
-  published on its own: it appears under "your reports" as *waiting for officer review* and turns into *verified*,
-  *not confirmed* or *resolved* as an officer acts (the page asks `GET /api/reports/{id}/status`, which exposes only
-  that outcome).
-- **Traffic authority:** log in, see reports *pending review* and *active* incidents, open **Evidence** (type, road,
-  location, severity, confidence, status timeline and every signal with its source and a SIMULATED badge), then
-  **Verify**, **Reject**, **Approve diversion** or **Resolve**; what-if, signal advice and a bulletin draft are
-  advice only, RoadPulse controls no signal.
-- **Connection:** the header shows `live · updated Ns ago`. The server sends a heartbeat every ~10 s; if the stream
-  drops or goes quiet, a banner says the information may be out of date and the page reconnects by itself.
-- Per-vehicle water-depth limits are **assumed demo values** in `backend/app/config.py`, not safety guidance.
+Details: `docs/ARCHITECTURE.md` (lifecycle, routing, notification design), `docs/ALERTS.md`.
 
-## Alert delivery (commuters, boards, Telegram)
+## Demo
 
-See [`docs/ALERTS.md`](docs/ALERTS.md): how people are warned **by route (not radius)**, **before the last turn-off**,
-before they leave (pre-trip) and again when the road clears, plus the honest limits. Pages: `/commute` (phone page
-with spoken alerts and a simulated drive) and `/board` (simulated roadside display). Story:
-`python simulator/alerts_demo.py --device-key KEY --password PASS`.
+`docs/DEMO.md` is the 8-minute script with every click, command, expected result and recovery step: a flood from a commuter's
+first route to the all-clear, then an accident through the two-stage police check, with alerts and the simulated board.
 
-## Demo scenario
-
-The full 10-step hackathon walkthrough, with what to say and what to click, is in [`docs/DEMO.md`](docs/DEMO.md).
-In a second terminal (the simulator reads `DEVICE_KEYS` and `OFFICER_USERS` from `.env`):
-```bash
-python simulator/demo.py story               # the 10-step demo, press Enter between steps
-python simulator/demo.py story --auto --auto-officer   # unattended: the script also plays the officer
-python simulator/demo.py all                 # the original scenario with an accident and planned works
-python simulator/demo.py all --auto          # no pauses
-python simulator/demo.py all --no-sensor     # when the real ESP32 is connected
+```powershell
+python simulator/demo.py story --auto --auto-officer --device-key $K --user officer --password $P   # the flood story, no browser
+python simulator/demo.py accident-field --auto --device-key $K --user officer --password $P --police-user unit1 --police-password $U
+python simulator/alerts_demo.py --device-key $K --password $P --police-user unit1 --police-password $U --auto
 ```
-1. Commuter view: pick **Two-wheeler**, click a start on the road on one side of *Demo hotspot A* (the circle on
-   the map) and a destination on the other side, on the same road. On the shipped Dwaraka Nagar map the hotspot is on
-   *4 th Lane Dwaraka nagar*: the direct 106 m ride becomes a 299 m or 362 m diversion (depending on direction) once
-   the water passes 10 cm.
-2. Run the scenario: rain is set, water rises, the sensor incident is verified, the bike route changes live.
-   Switch the vehicle to **Bus**: the bus is still allowed through at 35 cm.
-3. Authority view: log in. The accident (speed drop + one public report) is **pending**: verify it, then approve the
-   flood diversion, run **What-if** / **Signals** / **Bulletin**, then **Before / after evaluation**.
-4. Drain step: the incident auto-clears after `CLEAR_WINDOW_S` (120 s by default).
 
-**Honesty rules for the demo:** the simulator marks everything it sends as `simulated`, and the UI shows a dashed
-**SIMULATED** badge on those incidents, hotspot readings and planned works; the rain override is labelled
-"manual override set by an officer, not a forecast". Say this out loud during the demo. The evaluation uses a simplified
-traffic model (static assignment with a BPR delay curve), not SUMO, and its numbers are model outputs, not field data.
-Telugu text is template-based and should be checked by a native speaker.
+## Tests
 
-## How verification works
+```powershell
+python -m pytest -q tests --ignore=tests/e2e      # 158 unit and API tests, about 20 seconds
+pip install -r requirements-e2e.txt               # once: the Playwright package (uses your installed Chrome or Edge)
+python -m pytest -q tests/e2e                     # 21 tests in a real browser, about 2 minutes
+```
 
-| Evidence | Effect |
+The browser tests start their own server on the real map with a temporary database and play the whole story in six
+browser windows at once (commuter, citizen, control room, two alert subscribers, the board), the accident workflow with a police
+phone, wrong and non-ASCII passwords, forged sessions, script-injection attempts, security headers, phone layouts,
+live SSE updates, and recovery after a server restart. They block external map tiles so they run offline. They skip, with a
+reason, only if Playwright or a Chrome/Edge browser is not installed.
+
+Measured once on 28 Nov 2026 with `tools/loadtest.py` on a Windows 11 laptop, real map, the server and the load generator on
+the same machine, one server process: every request succeeded (0 errors). With 10 clients the median request took
+0.3 to 0.4 s; with 50 clients 1.5 to 1.8 s (p95 up to 3.3 s); it recovered fully afterwards; the live stream delivered an
+update to all 50 clients (p95 0.7 s). This is not a capacity claim: run it on your own host before relying on any number.
+
+## Documentation
+
+| File | Contents |
 |---|---|
-| Public reports (web, Telegram) | Shown to officers as **pending**. Any number of reports counts as **one untrusted source** (reporter ids are client-supplied, so they prove nothing). Never auto-verified. |
-| Keyed water sensor (`X-Device-Key`) | Trusted. Two consecutive readings ≥ 10 cm open an incident; confidence 0.8 verifies it. |
-| Keyed fleet speed probes | **Not trusted**, weight 0.4. Judged per road link from 8+ vehicles against this road's normal speed for this time, ignoring junction zones, and the dip must last 3 minutes (`probe_rules.py`). It raises a *Suspected slowdown* for officers and never publishes on its own (0.4 + report 0.35 = 0.61 stays pending). |
-| Planned works (officer) | Trusted; active during its time window. |
-| Officer **Verify** | Always verifies and publishes. |
-
-Commuters and routing only use **Verified** or **Responding** incidents. Confidence is still computed and shown to
-officers for every incident.
-
-## Map: real Visakhapatnam roads or synthetic grid
-
-The header shows which one is running; `/api/health` reports `map_mode` (`osm` or `synthetic`) and
-`/api/network/stats` gives the loaded graph's real statistics.
-- **Real OpenStreetMap roads (intended for the demo):** `data/area.graphml`, exported by `tools/fetch_map.py` for
-  Dwaraka Nagar with a 1500 m radius. Loaded with these rules: directed edges exactly as OSM gives them (one-way
-  roads stay one-way, no reverse edges invented); curved roads follow their real shape; of parallel edges between
-  two junctions the one with the lowest estimated travel time is kept; speed from OSM `maxspeed` where it is a number,
-  otherwise a road-class estimate (`speed_source: "estimate"`); the largest weakly connected part is kept.
-- **Synthetic (fallback, no internet needed):** a 9×9 grid around the centre with deliberately artificial names.
-
-**Demo hotspots are simulated.** Without a surveyed `data/hotspots.json`, the two demo hotspots are placed at the
-midpoint of a real road segment near the centre and named "Demo hotspot A (simulated) · <road>". They are
-demonstration points, **not known flood locations**; the UI marks them SIMULATED. The segment is chosen by rule, not
-by a hard-coded coordinate (`Store.place_demo_hotspots`), in this order: a **named** road; **two-way** (one-way roads
-are never used); at least 60 m long; severe waterlogging there leaves a **diversion for a two-wheeler** of at most
-800 m in both directions; both ends join real junctions; then the closest to the target spot. If nothing meets a rule
-the rule is dropped in that order, and the last resort is an unnamed two-way road, shown as "unnamed road".
-
-**Routing is road-segment exact.** The start and destination are projected onto their nearest road segment
-(limit `MAX_SNAP_M`, 250 m) and temporary split points are inserted into a per-request copy of the graph, so a route
-can begin in the middle of a long road and respects one-way direction. Points further than 250 m from any road get
-HTTP 422. Because one-way streets are kept, some pairs of points have no legal route; the API says so (422).
-
-## What's where
-
-| Path | What | Workstream |
-|---|---|---|
-| `backend/app/main.py` | HTTP API, live stream (SSE), lifecycle loop | B |
-| `backend/app/fusion.py`, `services.py`, `severity.py` | confidence fusion, lifecycle, risk rules | B |
-| `backend/app/probe_rules.py` | slowdown detection from many probes (link level, time-of-week baseline, persistence) | B |
-| `backend/app/alerts.py`, `channels.py` | who is warned and when: pre-trip, in-trip, U-turn, all-clear, boards, Telegram | B |
-| `backend/app/db.py`, `security.py` | SQLite persistence, auth, device keys, rate limits | B |
-| `backend/app/forecast.py`, `config.py` | rain forecast, flood countdown, hotspots | B / A |
-| `backend/app/roadgraph.py`, `routing.py`, `evaluate.py` | road graph, vehicle-aware routing, what-if, signals | C |
-| `backend/static/` | commuter + authority UI (Leaflet, no build step) | D |
-| `bot/telegram_bot.py` | citizen reports via Telegram | D |
-| `firmware/esp32_water_sensor/` | ESP32 + JSN-SR04T depth sensor | A |
-| `simulator/demo.py` | demo scenario through the real API | C |
-| `tools/fetch_map.py` | export a real OpenStreetMap area | C |
-| `tools/loadtest.py` | load test of critical workflows | B |
-| `docs/` | plan, API contract, incident schema | coordinator |
-
-## Use the real Visakhapatnam map
-```bash
-pip install osmnx
-python tools/fetch_map.py --lat 17.72867 --lon 83.308634 --dist 1500   # writes data/area.graphml, prints stats
-```
-Restart the server; the header should read "Real OpenStreetMap roads". Commit `data/area.graphml` so teammates and
-the Docker image use the same map. For real (surveyed) flood spots, copy `docs/hotspots.example.json` to
-`data/hotspots.json` and enter coordinates you have verified (site visit, news report, residents); do not guess.
-Delete `data/area.graphml` to go back to the synthetic grid.
-
-## Sensor (ESP32)
-Open `firmware/esp32_water_sensor/esp32_water_sensor.ino`, set Wi-Fi, `API_URL` (your laptop's LAN IP),
-`DEVICE_KEY` (one of `DEVICE_KEYS`), `SENSOR_ID` (matching a hotspot) and `DRY_DISTANCE_CM`, flash, and point it down at a container of water.
-
-## Telegram bot
-Create a bot with @BotFather, put the token in `.env`, then `python bot/telegram_bot.py`.
-Users share a location, pick what they see, and can send `/alerts`.
-
-## Tests and quality
-```bash
-python -m pytest -q tests          # 87 tests: domain rules, full report → reroute → dashboard → auto-clear chain,
-                                   # OSM graph loading, road-segment routing, demo hotspot placement on the real
-                                   # map, and regression tests for every issue found in the engineering reviews
-```
-CI (`.github/workflows/ci.yml`) runs the tests and a Docker smoke test on every push and pull request.
-
-### Load test
-```bash
-REPORT_RATE_PER_MIN=1000000 ROUTE_RATE_PER_MIN=1000000 DEVICE_RATE_PER_MIN=1000000 \
-  uvicorn app.main:app --app-dir backend --env-file .env --no-access-log --timeout-graceful-shutdown 3
-python tools/loadtest.py --device-key <your DEVICE_KEYS value>
-```
-Phases: normal (10 clients, 15 s) → burst (50 clients, 7.5 s) → recovery (10 clients, 15 s), then 50 live-stream clients.
-
-Measured 2026-11-27 on a 2-core cloud sandbox, **synthetic grid** (288 road segments), one active flood, before
-road-segment routing was added. Re-run on the real Visakhapatnam graph before quoting numbers. Latency in ms:
-
-| phase | workflow | req/s | p50 | p95 | p99 | errors |
-|---|---|---|---|---|---|---|
-| normal | route | 223 | 17 | 29 | 36 | 0% |
-| normal | sensor reading | 96 | 29 | 55 | 75 | 0% |
-| normal | report | 40 | 23 | 44 | 55 | 0% |
-| normal | incident list | 95 | 20 | 34 | 42 | 0% |
-| burst | route | 122 | 107 | 480 | 778 | 0% |
-| burst | sensor reading | 84 | 140 | 469 | 625 | 0% |
-| recovery | route | 206 | 18 | 32 | 53 | 0% |
-| recovery | sensor reading | 93 | 28 | 63 | 91 | 0% |
-
-Live stream: 50 / 50 clients connected and received an update; delivery p95 1.0 s (the server checks once a second).
-Under the 5× burst, p95 rises to about 0.5 s and recovers fully afterwards. A real OpenStreetMap graph is larger than
-the grid, so re-run this on your demo map before quoting any number; no other targets are claimed.
-
-## Deploy
-Any Docker host works. Free option: Render.com → New Web Service → connect this repo → Docker → add the `.env`
-values as environment variables. Free instances sleep and have no persistent disk, so the SQLite data resets on
-restart; that is acceptable for the demo (the simulator rebuilds the scenario in under a minute).
+| `docs/DEMO.md` | the demo script |
+| `docs/ARCHITECTURE.md` | components, folder structure, database, incident lifecycle, routing, notification design, security |
+| `docs/API.md` | every endpoint, who may call it, request fields, error codes |
+| `docs/CONFIGURATION.md` | every environment variable with its default |
+| `docs/DEPLOY.md` | local, Docker and Render, with a checklist before going public |
+| `docs/ALERTS.md` | how alerts are chosen and delivered, with the honest limits |
+| `docs/PLAN.md` | the original plan and API contract (the scope was frozen on 27 Nov 2026) |
 
 ## Security notes
-Officer actions need a signed bearer token (8 h); devices need `X-Device-Key`; reports, routes and device posts
-are rate-limited per client IP (`X-Forwarded-For` is ignored unless `TRUST_PROXY=1`, so it cannot be faked to
-dodge limits); every officer action is written to `audit_log`. Never commit `.env`; rotate the bot token after the
-hackathon.
 
-Officer live stream: the browser sends its login token in a header to `POST /api/stream/ticket` and gets a random
-ticket that is valid for 60 seconds and works once; only that ticket appears in the stream URL. If the connection
-drops, the spent ticket is refused (401) and the page fetches a new one automatically. Keep `--no-access-log` anyway
-so short-lived tickets don't pile up in logs, and `--timeout-graceful-shutdown 3` so a restart is not blocked by open
-live streams (both are in the Dockerfile).
-
-Retention: raw sensor readings 7 days, public reports 30 days, cleared incidents 30 days; the audit log is kept.
-Each incident keeps at most 120 evidence signals (latest plus strongest per source).
+Signed tokens (8 hours, role inside), device keys, per-IP rate limits, one-time stream tickets, parameterised SQL, escaped
+output, safe response headers, `no-store` on private responses, no CORS, secrets only in `.env`, an audit log of officer actions.
+Staff accounts are set in configuration (no user table, no password reset); there is no token revocation other than changing
+`ROADPULSE_SECRET`. Subscriber data is deleted on request and after 30 days of inactivity.
 
 ## Known limitations
-- Single process (in-memory working state + SQLite); run one server instance only.
-- Report-only incidents never auto-verify, by design; an officer must verify them.
-- Forecast needs internet. After a failure the API is not retried for 2 minutes; the last good forecast is used for
-  up to 3 hours, then the countdown shows "no forecast available". Use the rain override offline.
-- Officer accounts are configured in `.env`; there is no user-management screen.
-- The ESP32 sketch has not been tested on hardware yet.
-- No real traffic feed: congestion comes only from the speed probes the simulator (or a keyed device) posts, and the
-  evaluation is a simplified model. There is no camera/YOLO detection, no trained prediction model and no control of
-  traffic signals; signal output is advice for an officer.
-- The demo hotspots are simulated points on real roads, and the demo water depths and rain are simulated. Real
-  flood spots need surveyed coordinates in `data/hotspots.json`.
-- A citizen flood report within 200 m of a hotspot takes that hotspot's name in its title even when it is a separate
-  incident; the officer's Evidence panel shows the real road and location.
-- The officer session token is signed with `ROADPULSE_SECRET`; if that is not set, a random one is generated per run and
-  officers must log in again after a restart.
-- Browser checks were done in the Chromium-based Browser pane (desktop and 375 px phone width), not on a real phone or
-  in other browsers. Map tiles need internet; the road graph and routing do not.
-- MVP is frozen: no new features without the coordinator's approval. The phase 6 changes (UI, legend, report tracking,
-  heartbeat, map warning, `story` scenario) were explicitly approved.
+
+- One server process; in-memory working state plus SQLite. Do not run two instances.
+- The free hosting plan sleeps and loses data on restart (see `docs/DEPLOY.md`).
+- Incidents expire an hour after their last evidence (`REPORT_EXPIRY_S`); a silent sensor therefore keeps a flood alive for up to that hour unless an officer clears it.
+- The rain forecast needs internet; use the officer rain setting offline. Map tiles need internet; roads and routing do not.
+- The "before/after evaluation" is a simplified traffic model (not SUMO): its numbers are model output, not field data.
+- Alerts reach only people with the page open and location on (a phone browser pauses a page in a pocket) or a linked Telegram chat.
+- Tested in Chrome (desktop and a 390 px phone size). Not tested on real phones, other browsers, or against a live Telegram bot, and not deployed on Render or built with Docker in this environment.
+- Telugu bulletin text is template-based and should be checked by a native speaker.
+
+## Licences and data
+
+Road data and map tiles (c) [OpenStreetMap contributors](https://www.openstreetmap.org/copyright), ODbL: the attribution stays visible
+on every map. Satellite imagery (c) Esri, Maxar, Earthstar Geographics (internet needed; follows Esri's terms). Leaflet is
+vendored (BSD 2-clause). No external scripts or fonts are loaded; only the map tiles come from the internet.
