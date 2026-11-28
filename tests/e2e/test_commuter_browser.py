@@ -50,6 +50,7 @@ def test_planning_by_tapping_two_points_and_changing_vehicle(live, pages):
     click_map(page, *a)
     click_map(page, *b)
     expect(page.locator(".hero")).to_contain_text(re.compile(r"Your way is clear|A problem on your way"))
+    expect(page.locator("#pill-t")).to_have_text("Your trip")        # not stuck on "Checking your trip" once the result is shown
     for veh in ("two_wheeler", "auto", "bus"):
         page.locator(f'[data-veh="{veh}"]').click()
         expect(page.locator(f'[data-veh="{veh}"]')).to_have_class(re.compile(r"\bon\b"))
