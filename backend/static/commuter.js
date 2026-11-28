@@ -20,7 +20,7 @@ function renderPill() {
   x.classList.toggle("hidden", !state.A);
   if (!state.A) { t.textContent = "Where to?"; s.textContent = "Tap your start and your destination on the map"; }
   else if (!state.B) { t.textContent = "Start set"; s.textContent = "Now tap where you are going"; }
-  else { t.textContent = state.An && state.Bn ? `${state.An} → ${state.Bn}` : "Checking your trip"; s.textContent = `${{ two_wheeler: "Two-wheeler", auto: "Auto-rickshaw", car: "Car", bus: "Bus" }[state.vehicle]}`; }
+  else { t.textContent = state.An && state.Bn ? `${state.An} → ${state.Bn}` : state.trip ? "Your trip" : "Checking your trip"; s.textContent = `${{ two_wheeler: "Two-wheeler", auto: "Auto-rickshaw", car: "Car", bus: "Bus" }[state.vehicle]}`; }
 }
 $("pill").onclick = (e) => { if (e.target.id === "pill-x") { resetTrip(); return; } openSearch(); };
 
@@ -52,7 +52,7 @@ const OUTCOME = { pending: ["Waiting for a check", "Traffic police and the contr
 function myReports() {
   if (!state.mine.length) return "";
   return `<div class="card stack" data-my-reports><b>Your reports</b>${state.mine.map((r) => { const [t, why] = OUTCOME[r.outcome] || OUTCOME.gone;
-    return `<div class="row" style="flex-wrap:nowrap;gap:10px" data-report-status="${esc(r.outcome)}"><span class="ico">${icon(KIND[r.type] ? KIND[r.type].ic : "warn", 20)}</span><div class="grow"><b>${esc((KIND[r.type] || KIND.slowdown).name)}</b> <span class="chip ${r.outcome === "pending" ? "warnc" : "done"}">${esc(t)}</span><div class="small muted">${esc(why)}</div></div></div>`; }).join("")}</div>`;
+    return `<div class="row" style="flex-wrap:nowrap;gap:10px" data-report-status="${esc(r.outcome)}"><span class="ico" style="--c:#2563eb">${icon(KIND[r.type] ? KIND[r.type].ic : "warn", 20)}</span><div class="grow"><b>${esc((KIND[r.type] || KIND.slowdown).name)}</b> <span class="chip ${r.outcome === "pending" ? "warnc" : "done"}">${esc(t)}</span><div class="small muted">${esc(why)}</div></div></div>`; }).join("")}</div>`;
 }
 const saveMine = () => RP.store.set("rp_mine", JSON.stringify(state.mine.slice(0, 6)));
 async function pollMine(force) {
@@ -199,7 +199,7 @@ async function runTrip(quiet) {
   try { const r = await api("/api/routes", { method: "POST", body: JSON.stringify({ from_lat: state.A[0], from_lon: state.A[1], to_lat: state.B[0], to_lon: state.B[1], vehicle: state.vehicle, alternatives: 2 }) });
     if (seq !== runTrip.seq) return; L_.trip.clearLayers(); html = tripCard(r); }
   catch (e) { if (seq !== runTrip.seq) return; L_.trip.clearLayers(); html = `<div class="hero bad"><span class="ic">${icon("warn", 24)}</span><div><b>Could not check this trip</b>${esc(e.message)}</div></div>`; }
-  state.trip = { html }; renderSheet(); if (!quiet) sheet.set(1);
+  state.trip = { html }; renderPill(); renderSheet(); if (!quiet) sheet.set(1);
   if (before && before !== html) toast("Your trip was updated: road conditions changed.");
 }
 function tripCard(r) {
