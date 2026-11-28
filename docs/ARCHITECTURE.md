@@ -42,7 +42,7 @@ backend/static/       the front end: index.html (commuter), control.html, police
                       classic.html (detailed dashboard), rp.js / rp.css (shared), Leaflet (vendored)
 data/area.graphml     the real OpenStreetMap road graph for Dwaraka Nagar (committed)
 simulator/            demo.py (flood story, accident, two-stage police), alerts_demo.py
-tests/                158 unit and API tests;  tests/e2e/  browser tests in real Chrome
+tests/                160 unit and API tests;  tests/e2e/  browser tests in real Chrome
 tools/                fetch_map.py (export the graph), loadtest.py
 bot/telegram_bot.py   optional Telegram front end
 firmware/             ESP32 sensor sketch (written, NOT tested on hardware; not part of this software-only delivery)

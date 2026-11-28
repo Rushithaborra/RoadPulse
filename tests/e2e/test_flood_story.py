@@ -38,32 +38,31 @@ def test_the_flood_story_end_to_end(live, pages):
     sub = pages.open("/commute", label="subscriber")
     zoom_to(sub, lat, lon, 17)
     sub.locator("#name").fill("Ravi")
-    sub.locator("#vehicle").select_option("two_wheeler")
-    sub.locator("#pick-home").click()
+    sub.locator('[data-veh="two_wheeler"]').click()
+    sub.locator("#q-home").click()                                   # focus the Home box, then tap the map
     click_map(sub, *offset(lat, lon, -105, 0))
-    sub.locator("#pick-work").click()
+    sub.locator("#q-work").click()
     click_map(sub, *offset(lat, lon, 105, 0))
-    expect(sub.locator("#places")).to_contain_text("Home: set · Work: set")
+    expect(sub.locator("#q-home")).to_have_attribute("placeholder", "A spot you tapped")
     sub.locator("#consent").check()
-    sub.locator("#go").click()
-    expect(sub.locator("#live")).to_be_visible()
-    sub.locator("#leave-in").fill("10")
-    sub.locator("#set-depart").click()
-    expect(sub.locator("#state")).to_contain_text("Next departure")
+    sub.locator('[data-act="signup"]').click()
+    expect(sub.locator(".hero.ok")).to_contain_text("Alerts are on")
+    sub.locator('[data-leave="5"]').click()
+    expect(sub.locator("#toast")).to_contain_text("before you leave in 5 minutes")
 
     # a second subscriber who simply drives (no planned departure): this one will get the in-trip instruction.
     # (Each person is warned once per incident, so the pre-trip subscriber above is not warned again on the road.)
     driver = pages.open("/commute", label="driver")
     zoom_to(driver, lat, lon, 17)
     driver.locator("#name").fill("Asha")
-    driver.locator("#vehicle").select_option("two_wheeler")
-    driver.locator("#pick-home").click()
+    driver.locator('[data-veh="two_wheeler"]').click()
+    driver.locator("#q-home").click()
     click_map(driver, *offset(lat, lon, -105, 0))
-    driver.locator("#pick-work").click()
+    driver.locator("#q-work").click()
     click_map(driver, *offset(lat, lon, 105, 0))
     driver.locator("#consent").check()
-    driver.locator("#go").click()
-    expect(driver.locator("#live")).to_be_visible()
+    driver.locator('[data-act="signup"]').click()
+    expect(driver.locator(".hero.ok")).to_contain_text("Alerts are on")
 
     # -- 2. A citizen reports waterlogging (in a second browser)
     citizen = pages.open("/", label="citizen")
@@ -117,13 +116,12 @@ def test_the_flood_story_end_to_end(live, pages):
     expect(commuter.locator(".hero")).to_contain_text(re.compile(r"green route|no faster way"))
 
     # subscriber: a pre-trip alert, then an in-trip instruction while driving (simulated drive)
-    expect(sub.locator("li.alert.pre_trip")).to_be_visible(timeout=25000)
-    expect(sub.locator("li.alert.pre_trip")).to_contain_text("usual route")
-    expect(sub.locator("li.alert.pre_trip .sim")).to_have_text("SIMULATED")                  # simulated data is labelled
-    assert driver.locator("li.alert.in_trip, li.alert.uturn, li.alert.no_alternative").count() == 0
-    driver.locator("#speed").select_option("1")                                              # real time: a slow, readable drive
-    driver.locator("#sim").click()
-    expect(driver.locator("li.alert.in_trip, li.alert.uturn, li.alert.no_alternative").first).to_be_visible(timeout=60000)
+    expect(sub.locator(".card.alert.pre_trip")).to_be_visible(timeout=25000)
+    expect(sub.locator(".card.alert.pre_trip")).to_contain_text("usual route")
+    expect(sub.locator(".card.alert.pre_trip")).to_contain_text("demo")                  # simulated data is labelled
+    assert driver.locator(".card.alert.in_trip, .card.alert.uturn, .card.alert.no_alternative").count() == 0
+    driver.locator('[data-act="sim"]').click()
+    expect(driver.locator(".card.alert.in_trip, .card.alert.uturn, .card.alert.no_alternative").first).to_be_visible(timeout=60000)
 
     # -- 8. The simulated roadside board shows the warning
     boards = live.get("/api/boards").json()["boards"]
@@ -149,8 +147,8 @@ def test_the_flood_story_end_to_end(live, pages):
     assert [i for i in live.incidents() if i["status"] != "Cleared"] == []
 
     # -- 11. everyone gets the all-clear, 12. and the original route is back
-    expect(sub.locator("li.alert.clear")).to_be_visible(timeout=20000)
-    expect(driver.locator("li.alert.clear")).to_be_visible(timeout=20000)
+    expect(sub.locator(".card.alert.clear")).to_be_visible(timeout=20000)
+    expect(driver.locator(".card.alert.clear")).to_be_visible(timeout=20000)
     expect(commuter.locator(".hero.ok")).to_contain_text("Your way is clear", timeout=20000)
     expect(citizen.locator('[data-report-status="resolved"]')).to_contain_text("Resolved", timeout=25000)
     expect(board.locator(".clear")).to_contain_text("ROAD CLEAR", timeout=15000)

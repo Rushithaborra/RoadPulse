@@ -96,7 +96,7 @@ def handle_location(chat: int, lat: float, lon: float, api: httpx.Client) -> boo
         kind = setting.pop(chat)
         r = sub_call(api, chat, "POST", "/api/subscribers/{id}/places", json={f"{kind}_lat": lat, f"{kind}_lon": lon})
         send(chat, f"{kind.title()} saved." if r is not None and r.is_success
-             else f"That place is not on the mapped roads of the pilot area, so it was not saved.")
+             else "That place is not on the mapped roads of the pilot area, so it was not saved.")
         return True
     if chat in subs:
         r = sub_call(api, chat, "POST", "/api/subscribers/{id}/position", json={"lat": lat, "lon": lon})

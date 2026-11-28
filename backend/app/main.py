@@ -184,7 +184,8 @@ async def request_log(request: Request, call_next):
 
 # ---------------------------------------------------------------- serialisation
 
-def incident_view(inc: Incident, detail: bool = False) -> dict:
+def incident_view(inc: Incident, detail: bool = False, staff: bool = False) -> dict:
+    """staff=True adds the internal state (police check, who was warned) that the public must not see."""
     ts = now()
     by_source: dict[str, int] = {}
     for s in inc.signals:
@@ -206,13 +207,14 @@ def incident_view(inc: Incident, detail: bool = False) -> dict:
                           if inc.clear_candidate_since else None),
         "cleared_reason": inc.cleared_reason, "updated": inc.updated,
         "simulated": any(s.simulated for s in inc.signals),
-        "needs_field": field.needs_field(inc), "field_state": field.field_state(inc), "urgent": inc.urgent,
-        "field_severity": inc.field_severity,
-        "people_warned": sum(1 for a in store.alert_log if a["incident_id"] == inc.id and a["kind"] != "clear"),
         "road": S.rg.road_name(inc.lat, inc.lon),
         "affected_segments": [S.rg.edge_geo(u, v) for u, v in
                               S.rg.edges_near(inc.lat, inc.lon, config.INCIDENT_EDGE_RADIUS_M) if str(u) < str(v)],
     }
+    if staff:
+        d.update(needs_field=field.needs_field(inc), field_state=field.field_state(inc), urgent=inc.urgent,
+                 field_severity=inc.field_severity,
+                 people_warned=sum(1 for a in store.alert_log if a["incident_id"] == inc.id and a["kind"] != "clear"))
     if detail:
         d["signals"] = [s.model_dump() for s in inc.signals[-20:]]
         # who was warned is deliberately anonymous: when, what kind of message and whether Telegram carried it
@@ -295,7 +297,7 @@ def list_incidents(scope: str = Query("public", pattern="^(public|all)$"), inclu
             continue
         if not include_cleared and inc.status == "Cleared":
             continue
-        items.append(incident_view(inc))
+        items.append(incident_view(inc, staff=bool(officer)))
     return {"incidents": items}
 
 
@@ -304,7 +306,7 @@ def get_incident(incident_id: str, officer=Depends(optional_officer)):
     inc = _get(incident_id)
     if not officer and not services.is_published(inc, now()):
         raise HTTPException(404, "Incident not found")
-    return incident_view(inc, detail=bool(officer))
+    return incident_view(inc, detail=bool(officer), staff=bool(officer))
 
 
 @app.post("/api/reports", status_code=201)
@@ -586,7 +588,7 @@ def _officer_action(incident_id: str, action: str, officer: dict, reason: str | 
         inc.updated = ts
     S.db.audit(ts, who, f"incident_{action}", inc.id, {"reason": reason})
     _changed(inc)
-    return incident_view(inc)
+    return incident_view(inc, staff=True)
 
 
 # ---------------------------------------------------------------- field validation: control room assigns, police report
@@ -663,6 +665,8 @@ def _my_call(incident_id: str, unit: str, statuses=field.OPEN_CALL) -> Incident:
     inc = _get(incident_id)
     if not any(a["unit"] == unit and a["status"] in statuses for a in inc.assignments):
         raise HTTPException(403, "You were not sent to this call")
+    if inc.status == "Cleared":
+        raise HTTPException(409, "This call is already closed")
     return inc
 
 
@@ -734,7 +738,7 @@ def planned_works(w: PlannedWork, officer=Depends(require_officer)):
     inc = services.handle_planned(store, w)
     S.db.audit(now(), officer["sub"], "planned_work_created", inc.id, w.model_dump())
     _changed(inc)
-    return incident_view(inc)
+    return incident_view(inc, staff=True)
 
 
 @app.post("/api/weather/override")

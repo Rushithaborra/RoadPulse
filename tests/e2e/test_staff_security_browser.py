@@ -75,7 +75,7 @@ def test_text_typed_by_citizens_police_and_subscribers_is_never_run_as_script(li
     commute = pages.open("/commute", label="commute")
     commute.evaluate("([id, tok, name]) => localStorage.setItem('rp_sub', JSON.stringify({ id, token: tok, name }))", [sub["id"], sub["token"], PAYLOAD])
     commute.reload()
-    expect(commute.locator("#who")).to_have_text(PAYLOAD)
+    expect(commute.locator(".hero.ok")).to_contain_text(PAYLOAD)
     assert commute.evaluate("window.__xss") is None and commute.locator("img[src='x']").count() == 0
     live.post(f"/api/subscribers/inc-x", {}, headers={})                                                   # (harmless) unknown id: 404/405, never a crash
     live.http.delete(f"/api/subscribers/{sub['id']}", headers={"X-Subscriber-Token": sub["token"]})

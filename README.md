@@ -14,7 +14,7 @@ on real OpenStreetMap roads. This is a **software-only** delivery: no hardware i
 | The verification rules, the incident lifecycle, the two-stage police check | Speed probes (vehicles) in the demo |
 | Route-based alerts, pre-trip and in-trip warnings, the all-clear | The two flood-watch points (simulated points on real roads, not known flood spots) |
 | The commuter, control-room and police apps, and the live updates | The roadside boards (a web page that shows what a board would display) |
-| 179 automated tests, 21 of them in a real browser | The assumed safe water depth per vehicle (two-wheeler 10 cm, auto 20, car 30, ambulance 30, bus 45): demo values, **not safety guidance** |
+| 181 automated tests, 21 of them in a real browser | The assumed safe water depth per vehicle (two-wheeler 10 cm, auto 20, car 30, ambulance 30, bus 45): demo values, **not safety guidance** |
 
 **Not built:** camera or YOLO detection, a trained prediction model, control of traffic signals (the signal output is advice
 for an officer), real traffic feeds, Telegram tested against a live bot, the ESP32 sensor hardware (a sketch exists in
@@ -79,7 +79,7 @@ python simulator/alerts_demo.py --device-key $K --password $P --police-user unit
 ## Tests
 
 ```powershell
-python -m pytest -q tests --ignore=tests/e2e      # 158 unit and API tests, about 20 seconds
+python -m pytest -q tests --ignore=tests/e2e      # 160 unit and API tests, about 20 seconds
 pip install -r requirements-e2e.txt               # once: the Playwright package (uses your installed Chrome or Edge)
 python -m pytest -q tests/e2e                     # 21 tests in a real browser, about 2 minutes
 ```
