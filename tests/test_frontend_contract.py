@@ -15,6 +15,7 @@ def read(name):
 # ids a script creates itself (inside its own templates) rather than finding in the page
 PAGES = [("classic.html", "app.js", {"btn-retry"}),
          ("index.html", "commuter.js", {"send-report", "q-from", "q-to", "results", "report-note"}),
+         ("commute.html", "commute.js", {"name", "depart", "consent", "results", "q-home", "q-work"}),
          ("control.html", "control.js", {"user", "pass", "btn-login", "live"}),
          ("police.html", "police.js", {"user", "pass", "btn-login", "note"})]
 
@@ -57,7 +58,7 @@ def test_apps_explain_every_severity_in_plain_words_and_offer_satellite():
     assert "You cannot get through. Take another road." in shared          # blocked: a clear instruction
     assert "only if you are in a hurry" in shared                          # slow: optional
     assert "World_Imagery" in shared and "Esri" in shared                  # satellite map with attribution
-    for page in ("index.html", "control.html", "police.html"):
+    for page in ("index.html", "control.html", "police.html", "commute.html"):
         assert 'id="btn-style"' in read(page), f"{page} has no map / satellite switch"
 
 
