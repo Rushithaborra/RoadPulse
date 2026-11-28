@@ -188,12 +188,16 @@ function exampleTrip(i) {
   } else { state.A = state.center; state.B = [17.7238639, 83.3068879]; map.fitBounds([state.A, state.B], { padding: [80, 80] }); }
   drawTripPins(); setView("trip"); runTrip();
 }
-async function runTrip() {
-  state.trip = null; renderSheet(); L_.trip.clearLayers();
+// quiet = a refresh of a trip already on screen (an incident appeared or changed): keep the old card until the new one is ready.
+async function runTrip(quiet) {
+  const seq = (runTrip.seq = (runTrip.seq || 0) + 1), before = quiet && state.trip ? state.trip.html : null;
+  if (!quiet) { state.trip = null; renderSheet(); L_.trip.clearLayers(); }
+  let html;
   try { const r = await api("/api/routes", { method: "POST", body: JSON.stringify({ from_lat: state.A[0], from_lon: state.A[1], to_lat: state.B[0], to_lon: state.B[1], vehicle: state.vehicle, alternatives: 2 }) });
-    state.trip = { html: tripCard(r) }; }
-  catch (e) { state.trip = { html: `<div class="hero bad"><span class="ic">${icon("warn", 24)}</span><div><b>Could not check this trip</b>${esc(e.message)}</div></div>` }; }
-  renderSheet(); sheet.set(1);
+    if (seq !== runTrip.seq) return; L_.trip.clearLayers(); html = tripCard(r); }
+  catch (e) { if (seq !== runTrip.seq) return; L_.trip.clearLayers(); html = `<div class="hero bad"><span class="ic">${icon("warn", 24)}</span><div><b>Could not check this trip</b>${esc(e.message)}</div></div>`; }
+  state.trip = { html }; renderSheet(); if (!quiet) sheet.set(1);
+  if (before && before !== html) toast("Your trip was updated: road conditions changed.");
 }
 function tripCard(r) {
   const best = r.routes && r.routes[0], mins = (s) => Math.max(1, Math.round(s / 60));
@@ -243,6 +247,7 @@ async function refresh(force) {
       const ids = new Set(r.incidents.map((i) => i.id));
       if (state.seen) r.incidents.filter((i) => published(i) && !state.seen.has(i.id)).forEach((i) => { toast(`New road problem: ${headline(i)}. ${SEV[i.severity].label}.`); try { navigator.vibrate && navigator.vibrate([120, 60, 120]); } catch (e) { /* unsupported */ } });
       state.seen = ids; state.incidents = r.incidents; state.sig = sig; drawMap(); if (state.view === "overview" || state.view === "problem") renderSheet();
+      if (!force && state.A && state.B && state.view === "trip") runTrip(true);   // the road situation changed: check the trip again, no tap needed
       document.title = `${visible().length ? `(${visible().length}) ` : ""}RoadPulse — know before you go`;
       if (!state.fitted && visible().length) { state.fitted = true; const pts = visible().map((i) => [i.lat, i.lon]); const pad = sheet.phone() ? innerHeight * 0.5 : 0;
         map.fitBounds(L.latLngBounds(pts), { paddingTopLeft: [60, 110], paddingBottomRight: [60, 60 + pad], maxZoom: 17 }); }
